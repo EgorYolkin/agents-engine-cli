@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "bash": {
+    "allowed": [
+      {
+        "cmd": "tree",
+        "created_at": "2026-04-21T19:09:58.521Z"
+      },
+      {
+        "cmd": "ls",
+        "created_at": "2026-04-21T19:13:46.438Z"
+      },
+      {
+        "cmd": "pwd",
+        "created_at": "2026-04-21T19:16:34.348Z"
+      }
+    ]
+  }
+}

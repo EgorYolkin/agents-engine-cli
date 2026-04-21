@@ -6,7 +6,7 @@ import MessageFormat from "@messageformat/core";
 
 const DEFAULT_LOCALE = "ru";
 const FALLBACK_LOCALE = "en";
-const I18N_ENV_VAR = "AGENTS_ENGINE_LOCALE";
+const I18N_ENV_VAR = "MRMUSH_LOCALE";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BUILTIN_LOCALES_DIR = path.resolve(__dirname, "../../locales");
@@ -69,11 +69,11 @@ function getLocalePaths(locale, cwd) {
     builtin: path.join(BUILTIN_LOCALES_DIR, `${locale}.json`),
     global: path.join(
       xdgConfigHome,
-      "agents-engine-cli",
+      "mr-mush",
       "locales",
       `${locale}.json`,
     ),
-    project: path.join(cwd, ".agents-engine", "locales", `${locale}.json`),
+    project: path.join(cwd, ".mrmush", "locales", `${locale}.json`),
   };
 }
 

@@ -25,6 +25,7 @@ export async function openAiCompatibleChat({
   model,
   prompt,
   promptStack = null,
+  messages = null,
   signal = null,
   onToken = null,
 }) {
@@ -39,7 +40,7 @@ export async function openAiCompatibleChat({
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model,
-      messages: buildMessages(promptStack, prompt),
+      messages: messages ?? buildMessages(promptStack, prompt),
       stream,
     }),
     signal: abortCtrl.signal,

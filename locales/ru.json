@@ -76,8 +76,13 @@
       "model": "Переключить активную модель",
       "profile": "Переключить активный профиль",
       "prompt": "Просмотреть или изменить prompt layers",
+      "session": "Показать метрики текущей сессии",
+      "usage": "Показать общую usage статистику",
       "statusbar": "Настроить status bar",
-      "dot": "Выбрать маркер сообщений"
+      "dot": "Выбрать маркер сообщений",
+      "resume": "Открыть браузер сессий",
+      "card": "Показать карточку гриба",
+      "inittheme": "Создать theme.yaml для проекта"
     },
     "args": {
       "off": "Без reasoning",
@@ -101,7 +106,28 @@
       "statusbarSet": "statusbar: {prompt}",
       "promptEdited": "prompt edited: {layer}",
       "promptReset": "prompt reset: {layer}",
-      "promptHeader": "# {layer}"
+      "promptHeader": "# {layer}",
+      "sessionResumed": "сессия загружена: {title}",
+      "themeInitialized": "theme initialized: {path}"
+    },
+    "cards": {
+      "session": {
+        "id": "session",
+        "title": "title",
+        "provider": "provider",
+        "time": "time",
+        "messages": "messages u/a",
+        "tokens": "tokens",
+        "updated": "updated"
+      },
+      "usage": {
+        "sessions": "sessions",
+        "time": "time",
+        "messages": "messages u/a",
+        "tokens": "tokens",
+        "input": "input",
+        "output": "output"
+      }
     },
     "errors": {
       "unknownPromptLayer": "Неизвестный prompt layer: {layer}",
@@ -111,8 +137,36 @@
       "usageProviderUse": "Использование: /provider use <id>",
       "usageModelUse": "Использование: /model use <slug>",
       "usageProfileUse": "Использование: /profile use <name>",
-      "usageStatusbar": "Использование: /statusbar <template>, например /statusbar {folder} | {model} | {thinking} | {tokens}",
-      "unknownPromptSubcommand": "Неизвестная команда /prompt {subcommand}"
+      "usageStatusbar": "Использование: /statusbar <template>, например /statusbar {folder} | {model} | {thinking} | {messages} msgs | {session_tokens} tok | {session_time}",
+      "noActiveSession": "нет активной сессии",
+      "unknownPromptSubcommand": "Неизвестная команда /prompt {subcommand}",
+      "themeAlreadyExists": "theme file already exists: {path}"
+    }
+  },
+  "themeTemplate": {
+    "header": {
+      "title": "Тема Mr. Mush для текущего проекта.",
+      "line1": "Этот файл переопределяет встроенную тему и глобальную ~/.mrmush/theme.yaml.",
+      "line2": "Изменяй только нужные поля: отсутствующие значения будут унаследованы.",
+      "line3": "После правок просто перезапусти mrmush в этом проекте."
+    },
+    "colors": {
+      "title": "Цвета интерфейса.",
+      "line1": "fg и bg принимают hex-цвета (#aabbcc) или токены вроде cyan, magenta, whiteBright.",
+      "line2": "Доступные флаги стиля: bold, dim, italic, underline, inverse."
+    },
+    "symbols": {
+      "title": "Символы интерфейса.",
+      "line1": "Здесь можно менять prompt, messageDot и рамку frame."
+    },
+    "layout": {
+      "title": "Текстовый layout.",
+      "line1": "splash содержит ASCII-арт гриба.",
+      "line2": "maxSuggestions и inputPaddingX влияют на поведение input UI."
+    },
+    "animation": {
+      "title": "Анимации интерфейса.",
+      "line1": "frames используются для индикатора thinking."
     }
   },
   "warnings": {

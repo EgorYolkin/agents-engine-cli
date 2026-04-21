@@ -3,6 +3,8 @@ import { z } from "zod";
 export const PROVIDER_IDS = ["openai", "anthropic", "google", "ollama", "lmstudio"];
 export const PROFILE_IDS = ["default"];
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
+export const LEGACY_STATUSBAR_TEMPLATE = "{folder} | {model} | {thinking} | {tokens}";
+export const DEFAULT_STATUSBAR_TEMPLATE = "{folder} | {model} | {thinking} | {messages} msgs | {session_tokens} tok | {session_time}";
 
 const providerIdSchema = z.enum(PROVIDER_IDS);
 const profileIdSchema = z.enum(PROFILE_IDS);
@@ -26,7 +28,7 @@ const uiSchema = z.object({
   show_context_meter: z.boolean().default(false),
   editor: z.string().min(1).optional(),
   message_dot: z.string().min(1).default("⬢"),
-  statusbar_prompt: z.string().min(1).default("{folder} | {model} | {thinking} | {tokens}"),
+  statusbar_prompt: z.string().min(1).default(DEFAULT_STATUSBAR_TEMPLATE),
 }).strict();
 
 const reasoningSchema = z.object({
@@ -58,6 +60,23 @@ const toolsSchema = z.object({
     timeout_ms: z.number().int().positive().default(30_000),
     max_output_chars: z.number().int().positive().default(20_000),
     max_calls: z.number().int().positive().default(3),
+    allowed_commands: z.array(z.string().min(1)).default([
+      "pwd",
+      "ls",
+      "find",
+      "rg",
+      "cat",
+      "sed",
+      "head",
+      "tail",
+      "tree",
+    ]),
+    allowed_git_subcommands: z.array(z.string().min(1)).default([
+      "status",
+      "diff",
+      "log",
+      "show",
+    ]),
   }).default({}),
 }).default({});
 
@@ -94,6 +113,23 @@ export const builtInConfig = Object.freeze(userConfigSchema.parse({
       timeout_ms: 30_000,
       max_output_chars: 20_000,
       max_calls: 3,
+      allowed_commands: [
+        "pwd",
+        "ls",
+        "find",
+        "rg",
+        "cat",
+        "sed",
+        "head",
+        "tail",
+        "tree",
+      ],
+      allowed_git_subcommands: [
+        "status",
+        "diff",
+        "log",
+        "show",
+      ],
     },
   },
   auth: {

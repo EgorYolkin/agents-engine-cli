@@ -3,12 +3,19 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
-import { builtInConfig, flattenZodIssues, userConfigSchema } from "./schema.js";
+import {
+  builtInConfig,
+  DEFAULT_STATUSBAR_TEMPLATE,
+  flattenZodIssues,
+  LEGACY_STATUSBAR_TEMPLATE,
+  userConfigSchema,
+} from "./schema.js";
 
-const APP_DIR_NAME = ".agents-engine";
+const APP_DIR_NAME = ".mrmush";
 const CONFIG_FILE_NAME = "config.toml";
+const THEME_FILE_NAME = "theme.yaml";
 const DEFAULT_SYSTEM_PROMPT = [
-  "You are Agents Engine CLI.",
+  "You are Mr. Mush.",
   "Be direct, precise, and pragmatic.",
   "Prefer concrete implementation details over generic advice.",
   "",
@@ -69,14 +76,25 @@ function setAtPath(target, dottedPath, value) {
 function applyEnvOverrides(config, env) {
   const result = structuredClone(config);
 
-  if (env.AGENTS_ENGINE_PROVIDER) result.active_provider = env.AGENTS_ENGINE_PROVIDER;
-  if (env.AGENTS_ENGINE_MODEL) result.active_model = env.AGENTS_ENGINE_MODEL;
-  if (env.AGENTS_ENGINE_PROFILE) result.active_profile = env.AGENTS_ENGINE_PROFILE;
-  if (env.AGENTS_ENGINE_THINKING) {
-    result.reasoning = { ...result.reasoning, default_effort: env.AGENTS_ENGINE_THINKING };
+  if (env.MRMUSH_PROVIDER) result.active_provider = env.MRMUSH_PROVIDER;
+  if (env.MRMUSH_MODEL) result.active_model = env.MRMUSH_MODEL;
+  if (env.MRMUSH_PROFILE) result.active_profile = env.MRMUSH_PROFILE;
+  if (env.MRMUSH_THINKING) {
+    result.reasoning = { ...result.reasoning, default_effort: env.MRMUSH_THINKING };
   }
 
   return result;
+}
+
+function migrateLegacyStatusbar(config) {
+  const next = structuredClone(config);
+  if (next.ui?.statusbar_prompt === LEGACY_STATUSBAR_TEMPLATE) {
+    next.ui = {
+      ...next.ui,
+      statusbar_prompt: DEFAULT_STATUSBAR_TEMPLATE,
+    };
+  }
+  return next;
 }
 
 async function ensureDir(dirPath) {
@@ -136,8 +154,10 @@ export function getAppPaths(cwd = process.cwd(), homeDir = os.homedir()) {
     homeDir,
     rootDir,
     configFile: path.join(rootDir, CONFIG_FILE_NAME),
+    themeFile: path.join(rootDir, THEME_FILE_NAME),
     projectDir,
     projectConfigFile: path.join(projectDir, CONFIG_FILE_NAME),
+    projectThemeFile: path.join(projectDir, THEME_FILE_NAME),
     promptsDir,
     systemPromptFile: path.join(promptsDir, "system.md"),
     profilesDir: path.join(promptsDir, "profiles"),
@@ -152,6 +172,8 @@ export function getAppPaths(cwd = process.cwd(), homeDir = os.homedir()) {
     logFile: path.join(rootDir, "logs", "cli.log"),
     backupsDir: path.join(rootDir, "backups"),
     projectPromptFile: path.join(projectDir, "prompts", "system.md"),
+    historyDir: path.join(rootDir, "history"),
+    historyIndexFile: path.join(rootDir, "history", "index.json"),
   };
 }
 
@@ -167,6 +189,7 @@ export async function bootstrapConfig({ cwd = process.cwd(), homeDir = os.homedi
     ensureDir(paths.cacheDir),
     ensureDir(paths.logsDir),
     ensureDir(paths.backupsDir),
+    ensureDir(paths.historyDir),
   ]);
 
   const defaultProvider = detectedProviders[0]?.id ?? builtInConfig.active_provider;
@@ -277,10 +300,10 @@ export async function resolvePromptStack(resolvedConfig, cwd = process.cwd()) {
   const { paths } = resolvedConfig;
   const profile = resolvedConfig.activeProfile;
   const providerId = resolvedConfig.activeProvider;
-  const agentsEngineFile = await findProjectFileUpwards(cwd, "AGENTS-ENGINE.md");
+  const agentsEngineFile = await findProjectFileUpwards(cwd, "MRMUSH.md");
   const agentsFile = await findProjectFileUpwards(cwd, "AGENTS.md");
   const layers = [
-    { id: "project-agents-engine", source: agentsEngineFile, content: agentsEngineFile ? await maybeReadText(agentsEngineFile) : null },
+    { id: "project-mrmush", source: agentsEngineFile, content: agentsEngineFile ? await maybeReadText(agentsEngineFile) : null },
     { id: "built-in", source: "built-in", content: DEFAULT_SYSTEM_PROMPT },
     { id: "global-system", source: paths.systemPromptFile, content: await maybeReadText(paths.systemPromptFile) },
     { id: "profile", source: paths.profilePromptFile(profile), content: await maybeReadText(paths.profilePromptFile(profile)) },
@@ -307,7 +330,8 @@ export async function loadConfig({ cwd = process.cwd(), env = process.env, runti
     ),
     runtimeOverrides.config ?? {},
   );
-  const withEnv = applyEnvOverrides(merged, env);
+  const withMigratedUi = migrateLegacyStatusbar(merged);
+  const withEnv = applyEnvOverrides(withMigratedUi, env);
   const validated = userConfigSchema.parse(withEnv);
   const activeProvider = runtimeOverrides.providerId ?? validated.active_provider;
   const activeProfile = runtimeOverrides.profile ?? validated.active_profile;

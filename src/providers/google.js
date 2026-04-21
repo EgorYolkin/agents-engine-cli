@@ -57,17 +57,35 @@ export const googleProvider = {
     url.searchParams.set("key", apiKey);
     if (stream) url.searchParams.set("alt", "sse");
 
-    const parts = [];
-    if (resolvedConfig.promptStack?.text) {
-      parts.push({ text: resolvedConfig.promptStack.text });
+    let contents;
+    let systemInstruction;
+
+    if (options.messages?.length) {
+      // Convert OpenAI-format messages to Gemini format
+      const nonSystem = options.messages.filter((m) => m.role !== "system");
+      const systemMsg = options.messages.find((m) => m.role === "system");
+      if (systemMsg) {
+        systemInstruction = { parts: [{ text: systemMsg.content }] };
+      }
+      contents = nonSystem.map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      }));
+    } else {
+      const parts = [];
+      if (resolvedConfig.promptStack?.text) {
+        systemInstruction = { parts: [{ text: resolvedConfig.promptStack.text }] };
+      }
+      parts.push({ text: prompt });
+      contents = [{ role: "user", parts }];
     }
-    parts.push({ text: prompt });
 
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ role: "user", parts }],
+        ...(systemInstruction ? { systemInstruction } : {}),
+        contents,
       }),
       signal,
     });

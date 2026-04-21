@@ -4,7 +4,7 @@ import path from "node:path";
 const APPROVALS_FILE = "approvals.json";
 
 function approvalsPath(cwd) {
-  return path.join(cwd, ".agents-engine", APPROVALS_FILE);
+  return path.join(cwd, ".mrmush", APPROVALS_FILE);
 }
 
 async function readApprovals(cwd) {

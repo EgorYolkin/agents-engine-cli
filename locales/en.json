@@ -76,8 +76,13 @@
       "model": "Switch active model",
       "profile": "Switch active profile",
       "prompt": "Inspect or edit prompt layers",
+      "session": "Show current session metrics",
+      "usage": "Show total usage metrics",
       "statusbar": "Configure status bar",
-      "dot": "Choose message marker"
+      "dot": "Choose message marker",
+      "resume": "Open session browser",
+      "card": "Show mushroom card",
+      "inittheme": "Create project theme.yaml"
     },
     "args": {
       "off": "No reasoning",
@@ -101,7 +106,28 @@
       "statusbarSet": "statusbar: {prompt}",
       "promptEdited": "prompt edited: {layer}",
       "promptReset": "prompt reset: {layer}",
-      "promptHeader": "# {layer}"
+      "promptHeader": "# {layer}",
+      "sessionResumed": "session loaded: {title}",
+      "themeInitialized": "theme initialized: {path}"
+    },
+    "cards": {
+      "session": {
+        "id": "session",
+        "title": "title",
+        "provider": "provider",
+        "time": "time",
+        "messages": "messages u/a",
+        "tokens": "tokens",
+        "updated": "updated"
+      },
+      "usage": {
+        "sessions": "sessions",
+        "time": "time",
+        "messages": "messages u/a",
+        "tokens": "tokens",
+        "input": "input",
+        "output": "output"
+      }
     },
     "errors": {
       "unknownPromptLayer": "Unknown prompt layer: {layer}",
@@ -111,8 +137,36 @@
       "usageProviderUse": "Usage: /provider use <id>",
       "usageModelUse": "Usage: /model use <slug>",
       "usageProfileUse": "Usage: /profile use <name>",
-      "usageStatusbar": "Usage: /statusbar <template>, e.g. /statusbar {folder} | {model} | {thinking} | {tokens}",
-      "unknownPromptSubcommand": "Unknown command /prompt {subcommand}"
+      "usageStatusbar": "Usage: /statusbar <template>, e.g. /statusbar {folder} | {model} | {thinking} | {messages} msgs | {session_tokens} tok | {session_time}",
+      "noActiveSession": "no active session",
+      "unknownPromptSubcommand": "Unknown command /prompt {subcommand}",
+      "themeAlreadyExists": "theme file already exists: {path}"
+    }
+  },
+  "themeTemplate": {
+    "header": {
+      "title": "Mr. Mush theme for the current project.",
+      "line1": "This file overrides the built-in theme and the global ~/.mrmush/theme.yaml.",
+      "line2": "Change only the fields you need; missing values will be inherited.",
+      "line3": "After editing, just restart mrmush in this project."
+    },
+    "colors": {
+      "title": "UI colors.",
+      "line1": "fg and bg accept hex colors (#aabbcc) or tokens like cyan, magenta, whiteBright.",
+      "line2": "Available style flags: bold, dim, italic, underline, inverse."
+    },
+    "symbols": {
+      "title": "UI symbols.",
+      "line1": "You can change prompt, messageDot, and the frame characters here."
+    },
+    "layout": {
+      "title": "Text layout.",
+      "line1": "splash contains the mushroom ASCII art.",
+      "line2": "maxSuggestions and inputPaddingX affect the input UI behavior."
+    },
+    "animation": {
+      "title": "UI animations.",
+      "line1": "frames are used for the thinking indicator."
     }
   },
   "warnings": {

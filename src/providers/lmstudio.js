@@ -34,6 +34,7 @@ export const lmstudioProvider = {
       model,
       prompt,
       promptStack: resolvedConfig.promptStack,
+      messages: options.messages ?? null,
       signal,
       onToken: options.onToken,
     });

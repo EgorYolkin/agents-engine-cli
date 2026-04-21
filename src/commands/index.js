@@ -10,6 +10,11 @@ import {
   saveConfig,
   saveConfigPatch,
 } from "../config/loader.js";
+import { openSessionBrowser } from "../history/browser.js";
+import { aggregateSessionSummaries, formatDuration, formatTokenCount } from "../history/metrics.js";
+import { listSessions, loadSession } from "../history/session.js";
+import { printMushCard } from "../ui/mush-card.js";
+import { createThemeTemplate } from "../ui/theme.js";
 
 export const DOT_CHOICES = [
   "✦", "⌁", "⁛", "⧉", "⬩", "✲", "✧", "✺", "⋆", "❈", "❯", "⊞", "⚬", "⁝", "⊹", "▰", "▱", "◈", "❖", "◬", "⬢", "⧇", "✬", "✫", "☄", "☾", "☽", "❂", "✵", "➱", "⚙", "⚯", "⑇", "♾", "⚡", "✿", "✽", "❀", "❦", "✥", "╾", "╼", "⁖", "▓", "▒", "░", "⟦", "⟧", "❮", "ᗢ", "⚆", "ꕤ", "ೃ", "༄", "✾", "❁", "❃", "❄", "❅", "❆", "❉", "❊", "❋", "✱", "✳", "✴", "✶", "✷", "✸", "✹", "✻", "✼", "✩", "✪", "✭", "✮", "✯", "✰", "⁕", "⁗", "⁘", "⁙", "⁚", "⁜", "⁞", "⍟", "⊛", "⊜", "⊝", "⊟", "⊠", "⊡", "⋇", "⋈", "⋉", "⋊", "⋋", "⋌", "⋍", "⋎", "⋏", "⋐", "⋑", "⋒", "⋓", "⋔", "⋕", "⋖", "⋗", "⋘", "⋙", "⋚", "⋛", "⋜", "⋝", "⋞", "⋟"
@@ -33,6 +38,11 @@ export const COMMANDS = [
   { name: "model", descriptionKey: "commands.descriptions.model" },
   { name: "profile", descriptionKey: "commands.descriptions.profile" },
   { name: "prompt", descriptionKey: "commands.descriptions.prompt" },
+  { name: "resume", descriptionKey: "commands.descriptions.resume" },
+  { name: "card", descriptionKey: "commands.descriptions.card" },
+  { name: "session", descriptionKey: "commands.descriptions.session" },
+  { name: "usage", descriptionKey: "commands.descriptions.usage" },
+  { name: "inittheme", descriptionKey: "commands.descriptions.inittheme" },
   { name: "statusbar", descriptionKey: "commands.descriptions.statusbar" },
   {
     name: "dot",
@@ -83,14 +93,23 @@ const EFFORT_MAP = {
   xhigh: "xhigh"
 };
 
-function printSuccess(message) {
-  process.stdout.write(`\n  ${chalk.green("✓")} ${message}\n\n`);
+function successResult(message) {
+  return { handled: true, message };
 }
 
-function printError(message, i18n) {
-  process.stdout.write(
-    `\n  ${chalk.red(i18n.t("commands.messages.errorPrefix"))} ${message}\n\n`,
-  );
+function silentResult() {
+  return { handled: true };
+}
+
+function renderedResult() {
+  return { handled: true, rendered: true };
+}
+
+function errorResult(message, i18n) {
+  return {
+    handled: true,
+    message: `${i18n.t("commands.messages.errorPrefix")} ${message}`,
+  };
 }
 
 function getPromptLayerPath(layer, config, i18n) {
@@ -135,11 +154,23 @@ function formatConfigView(config, runtimeOverrides) {
       active_profile: config.activeProfile,
       thinking: runtimeOverrides.thinkingLevel ?? config.thinkingLevel,
       prompt_layers: config.promptStack.layers.map((layer) => layer.source),
-      config_file: config.paths.configFile
+      config_file: config.paths.configFile,
     },
     null,
     2,
   );
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "–";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "–";
+  return date.toISOString().replace("T", " ").slice(0, 16);
+}
+
+function renderStatsCard(context, rows) {
+  process.stdout.write("\n");
+  printMushCard(context, rows);
 }
 
 export async function executeCommand(text, context) {
@@ -161,13 +192,12 @@ export async function executeCommand(text, context) {
 
       const effort = EFFORT_MAP[level];
       const display = effort ? chalk.cyan(level) : chalk.dim("off");
-      printSuccess(
+      return successResult(
         i18n.t("commands.messages.thinkingSet", {
           tick: chalk.green("✓"),
           level: display
         }).replace(`${chalk.green("✓")} `, ""),
       );
-      return true;
     }
     case "dot": {
       const dot = DOT_CHOICES.includes(arg) ? arg : "⬢";
@@ -187,14 +217,12 @@ export async function executeCommand(text, context) {
         homeDir: os.homedir()
       });
 
-      printSuccess(i18n.t("commands.messages.dotSet", { dot }));
-      return true;
+      return successResult(i18n.t("commands.messages.dotSet", { dot }));
     }
     case "statusbar": {
       const prompt = argParts.join(" ").trim();
       if (!prompt) {
-        printError(i18n.t("commands.errors.usageStatusbar"), i18n);
-        return true;
+        return errorResult(i18n.t("commands.errors.usageStatusbar"), i18n);
       }
 
       context.runtimeOverrides = {
@@ -213,23 +241,20 @@ export async function executeCommand(text, context) {
         homeDir: os.homedir()
       });
 
-      printSuccess(i18n.t("commands.messages.statusbarSet", { prompt }));
-      return true;
+      return successResult(i18n.t("commands.messages.statusbarSet", { prompt }));
     }
     case "config": {
       const sub = argParts[0] ?? "show";
 
       if (sub === "show") {
-        process.stdout.write(`\n${formatConfigView(config, context.runtimeOverrides)}\n\n`);
-        return true;
+        return successResult(formatConfigView(config, context.runtimeOverrides));
       }
 
       if (sub === "set") {
         const targetPath = argParts[1];
         const rawValue = argParts.slice(2).join(" ");
         if (!targetPath || !rawValue) {
-          printError(i18n.t("commands.errors.usageConfigSet"), i18n);
-          return true;
+          return errorResult(i18n.t("commands.errors.usageConfigSet"), i18n);
         }
 
         const next = await saveConfigPatch(
@@ -246,8 +271,7 @@ export async function executeCommand(text, context) {
           ...next
         };
 
-        printSuccess(i18n.t("commands.messages.configUpdated", { path: targetPath }));
-        return true;
+        return successResult(i18n.t("commands.messages.configUpdated", { path: targetPath }));
       }
 
       if (sub === "save") {
@@ -275,54 +299,47 @@ export async function executeCommand(text, context) {
 
         await saveConfig(next, config.paths);
         context.runtimeOverrides = {};
-        printSuccess(
+        return successResult(
           i18n.t("commands.messages.configSaved", {
             path: config.paths.configFile
           }),
         );
-        return true;
       }
 
-      printError(
+      return errorResult(
         i18n.t("commands.errors.unknownConfigSubcommand", {
           subcommand: sub
         }),
         i18n,
       );
-      return true;
     }
     case "provider": {
       if (argParts[0] !== "use" || !argParts[1]) {
-        printError(i18n.t("commands.errors.usageProviderUse"), i18n);
-        return true;
+        return errorResult(i18n.t("commands.errors.usageProviderUse"), i18n);
       }
 
       context.runtimeOverrides = {
         ...context.runtimeOverrides,
         providerId: argParts[1]
       };
-      printSuccess(
+      return successResult(
         i18n.t("commands.messages.providerSet", { providerId: argParts[1] }),
       );
-      return true;
     }
     case "model": {
       if (argParts[0] !== "use" || !argParts[1]) {
-        printError(i18n.t("commands.errors.usageModelUse"), i18n);
-        return true;
+        return errorResult(i18n.t("commands.errors.usageModelUse"), i18n);
       }
 
       context.runtimeOverrides = {
         ...context.runtimeOverrides,
         model: argParts[1]
       };
-      printSuccess(i18n.t("commands.messages.modelSet", { model: argParts[1] }));
-      return true;
+      return successResult(i18n.t("commands.messages.modelSet", { model: argParts[1] }));
     }
     case "profile": {
       if (argParts[0] !== "use" || !argParts[1]) {
-        printError(i18n.t("commands.errors.usageProfileUse"), i18n);
-        return true;
+        return errorResult(i18n.t("commands.errors.usageProfileUse"), i18n);
       }
 
       context.runtimeOverrides = {
@@ -332,10 +349,9 @@ export async function executeCommand(text, context) {
           active_profile: argParts[1]
         }
       };
-      printSuccess(
+      return successResult(
         i18n.t("commands.messages.profileSet", { profile: argParts[1] }),
       );
-      return true;
     }
     case "prompt": {
       const sub = argParts[0] ?? "show";
@@ -344,18 +360,16 @@ export async function executeCommand(text, context) {
 
       if (sub === "show") {
         const content = await fs.readFile(filePath, "utf8").catch(() => "");
-        process.stdout.write(
-          `\n${i18n.t("commands.messages.promptHeader", { layer })}\n${content}\n`,
+        return successResult(
+          `${i18n.t("commands.messages.promptHeader", { layer })}\n${content}`.trimEnd(),
         );
-        return true;
       }
 
       if (sub === "edit") {
         const editor = config.ui.editor || process.env.EDITOR || "vi";
         await backupFile(filePath, config.paths);
         await openEditor(filePath, editor, i18n);
-        printSuccess(i18n.t("commands.messages.promptEdited", { layer }));
-        return true;
+        return successResult(i18n.t("commands.messages.promptEdited", { layer }));
       }
 
       if (sub === "reset") {
@@ -366,7 +380,7 @@ export async function executeCommand(text, context) {
         );
         const defaultText =
           layer === "system"
-            ? "You are Agents Engine CLI.\nBe direct, precise, and pragmatic.\nPrefer concrete implementation details over generic advice.\n"
+            ? "You are Mr. Mush.\nBe direct, precise, and pragmatic.\nPrefer concrete implementation details over generic advice.\n"
             : layer === "profile"
               ? "Default profile:\n- Keep answers concise.\n- Explain tradeoffs when they affect implementation.\n"
               : layer === "provider"
@@ -376,22 +390,92 @@ export async function executeCommand(text, context) {
         await backupFile(filePath, config.paths);
         await fs.mkdir(path.dirname(sourcePath), { recursive: true });
         await fs.writeFile(filePath, defaultText, "utf8");
-        printSuccess(i18n.t("commands.messages.promptReset", { layer }));
-        return true;
+        return successResult(i18n.t("commands.messages.promptReset", { layer }));
       }
 
-      printError(
+      return errorResult(
         i18n.t("commands.errors.unknownPromptSubcommand", {
           subcommand: sub
         }),
         i18n,
       );
-      return true;
+    }
+    case "resume": {
+      const historyDir = context.config.paths.historyDir;
+      const theme = context.ui?.theme ?? {};
+      process.stdout.write("\n");
+      const session = await openSessionBrowser(historyDir, theme);
+      if (!session) return successResult("Resume cancelled.");
+
+      // Load messages into current session context for the chat loop to pick up
+      context.resumedSession = session;
+      return successResult(i18n.t("commands.messages.sessionResumed", { title: session.meta?.title ?? session.id }));
+    }
+    case "card": {
+      process.stdout.write("\n");
+      printMushCard(context);
+      return successResult("Card rendered.");
+    }
+    case "session": {
+      const sessionId = context.currentSession?.id;
+      if (!sessionId) {
+        return errorResult(i18n.t("commands.errors.noActiveSession"), i18n);
+      }
+      const liveMeta = context.currentSessionMeta ?? {};
+      const liveMetrics = context.currentSessionMetrics ?? {};
+      const provider = context.runtimeOverrides?.providerId ?? context.config?.activeProvider ?? liveMeta.provider ?? "–";
+      const model = context.runtimeOverrides?.model ?? context.config?.activeModel ?? liveMeta.model ?? "–";
+      const createdAt = liveMeta.createdAt ?? context.currentSessionStartedAt ?? null;
+      const durationMs = createdAt
+        ? Math.max(0, Date.now() - new Date(createdAt).getTime())
+        : (liveMeta.durationMs ?? 0);
+      renderStatsCard(context, [
+        { text: `⬢  ${i18n.t("commands.cards.session.id")}: ${sessionId}` },
+        { text: `⬢  ${i18n.t("commands.cards.session.title")}: ${liveMeta.title ?? "–"}` },
+        { text: `⬢  ${i18n.t("commands.cards.session.provider")}: ${provider}/${model}` },
+        { text: `⬢  ${i18n.t("commands.cards.session.time")}: ${formatDuration(durationMs)}` },
+        { text: `⬢  ${i18n.t("commands.cards.session.messages")}: ${liveMetrics.messageCount ?? 0}` },
+        { text: `⬢  ${i18n.t("commands.cards.session.tokens")}: ${formatTokenCount(liveMetrics.totalTokens ?? 0)}` },
+        { text: `⬢  ${i18n.t("commands.cards.session.updated")}: ${formatDateTime(new Date().toISOString())}` },
+      ]);
+      return renderedResult();
+    }
+    case "usage": {
+      const historyDir = context.config?.paths?.historyDir ?? config.paths.historyDir;
+      const sessions = await listSessions(historyDir);
+      const loaded = await Promise.all(sessions.map((session) => loadSession(historyDir, session.id)));
+      const totals = aggregateSessionSummaries(loaded.map((session) => session.meta ?? {}));
+      renderStatsCard(context, [
+        { text: `⬢  ${i18n.t("commands.cards.usage.sessions")}: ${totals.sessionCount}` },
+        { text: `⬢  ${i18n.t("commands.cards.usage.time")}: ${formatDuration(totals.durationMs)}` },
+        { text: `⬢  ${i18n.t("commands.cards.usage.messages")}: ${totals.messageCount} (${totals.userMessages}/${totals.assistantMessages})` },
+        { text: `⬢  ${i18n.t("commands.cards.usage.tokens")}: ${formatTokenCount(totals.totalTokens)}` },
+        { text: `⬢  ${i18n.t("commands.cards.usage.input")}: ${formatTokenCount(totals.inputTokens)}` },
+        { text: `⬢  ${i18n.t("commands.cards.usage.output")}: ${formatTokenCount(totals.outputTokens)}` },
+      ]);
+      return renderedResult();
+    }
+    case "inittheme": {
+      const filePath = config.paths.projectThemeFile;
+      try {
+        await fs.access(filePath);
+        return errorResult(
+          i18n.t("commands.errors.themeAlreadyExists", { path: filePath }),
+          i18n,
+        );
+      } catch (error) {
+        if (error?.code !== "ENOENT") {
+          throw error;
+        }
+      }
+
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, createThemeTemplate(i18n), "utf8");
+      return successResult(
+        i18n.t("commands.messages.themeInitialized", { path: filePath }),
+      );
     }
     default:
-      process.stdout.write(
-        `\n  ${chalk.red(i18n.t("commands.messages.unknownCommand", { command: rawCmd }))}\n\n`,
-      );
-      return true;
+      return errorResult(i18n.t("commands.messages.unknownCommand", { command: rawCmd }), i18n);
   }
 }

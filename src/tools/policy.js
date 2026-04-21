@@ -1,6 +1,4 @@
 const FORBIDDEN_SHELL_CHARS = /[;&|<>`$(){}[\]\n\r]/;
-const READ_ONLY_COMMANDS = new Set(["pwd", "ls", "find", "rg", "cat", "sed", "head", "tail", "tree"]);
-const READ_ONLY_GIT_SUBCOMMANDS = new Set(["status", "diff", "log", "show"]);
 
 export function parseCommand(cmd) {
   if (FORBIDDEN_SHELL_CHARS.test(cmd)) {
@@ -50,11 +48,13 @@ export function parseCommand(cmd) {
   return { ok: true, argv };
 }
 
-export function evaluateBashPolicy(cmd) {
+export function evaluateBashPolicy(cmd, config = {}) {
   const parsed = parseCommand(cmd);
   if (!parsed.ok) return parsed;
 
   const [bin, subcommand] = parsed.argv;
+  const allowedCommands = new Set(config.allowed_commands ?? []);
+  const allowedGitSubcommands = new Set(config.allowed_git_subcommands ?? []);
   if (bin === "find" && parsed.argv.some((arg) => arg === "-exec" || arg === "-delete")) {
     return { ok: false, error: "find -exec and find -delete are not allowed" };
   }
@@ -62,10 +62,10 @@ export function evaluateBashPolicy(cmd) {
     return { ok: false, error: "sed in-place editing is not allowed" };
   }
 
-  if (READ_ONLY_COMMANDS.has(bin)) {
+  if (allowedCommands.has(bin)) {
     return { ok: true, argv: parsed.argv };
   }
-  if (bin === "git" && READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) {
+  if (bin === "git" && allowedCommands.has("git") && allowedGitSubcommands.has(subcommand)) {
     return { ok: true, argv: parsed.argv };
   }
 

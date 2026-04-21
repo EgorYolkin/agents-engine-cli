@@ -34,6 +34,7 @@ export async function runProviderWithTools({
   provider,
   config,
   prompt,
+  messages = null,
   runtimeOverrides,
   signal,
   context,
@@ -72,7 +73,7 @@ export async function runProviderWithTools({
       currentPrompt,
       runtimeOverrides,
       signal,
-      callIndex === 0 ? { onToken: tokenHandler } : {},
+      callIndex === 0 ? { onToken: tokenHandler, messages } : {},
     );
     lastResponse = response;
 
@@ -92,7 +93,7 @@ export async function runProviderWithTools({
       toolResult = toolErrorResult(parsed.call.args.cmd, `tool call limit exceeded (${maxCalls})`);
     } else {
       const cmd = parsed.call.args.cmd;
-      const policy = evaluateBashPolicy(cmd);
+      const policy = evaluateBashPolicy(cmd, toolConfig);
       if (!policy.ok) {
         toolResult = toolErrorResult(cmd, policy.error);
       } else {

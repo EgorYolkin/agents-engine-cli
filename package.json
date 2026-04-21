@@ -1,16 +1,17 @@
 {
-  "name": "agents-engine-cli",
-  "version": "1.0.0",
+  "name": "mr-mush",
+  "version": "1.1.5",
   "type": "module",
   "bin": {
-    "agents-engine": "./bin/agents-engine.js"
+    "mrmush": "./bin/agents-engine.js"
   },
   "dependencies": {
-    "@messageformat/core": "^3.4.0",
     "@clack/prompts": "^0.9.1",
+    "@messageformat/core": "^3.4.0",
     "chalk": "^5.4.1",
     "figures": "^6.1.0",
     "smol-toml": "^1.6.1",
+    "yaml": "^2.8.3",
     "zod": "^4.3.6"
   }
 }

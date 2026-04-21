@@ -20,6 +20,10 @@ const onCancel = (i18n) => {
   process.exit(0);
 };
 
+function resetTerminalSurface() {
+  process.stdout.write("\x1b[?25h\x1b[2J\x1b[3J\x1b[H\r\x1b[J");
+}
+
 async function isBinaryInstalled(bin) {
   try {
     await execFileAsync("which", [bin]);
@@ -53,9 +57,6 @@ async function buildProviderOptions(i18n) {
 export async function runSetupScreen(context) {
   const { i18n, cwd, runtimeOverrides } = context;
 
-  // Шаг 1: определяем какие CLI установлены
-  const spinner = p.spinner();
-  spinner.start(i18n.t("setup.spinner.checkingCli"));
   const providerOptions = await buildProviderOptions(i18n);
 
   const available = providerOptions.filter((o) => !o.disabled);
@@ -75,18 +76,12 @@ export async function runSetupScreen(context) {
   });
   if (p.isCancel(providerId)) onCancel(i18n);
 
-  // Шаг 3: загрузка моделей через CLI провайдера
-  spinner.start(i18n.t("setup.spinner.loadingModels", { providerId }));
   let modelOptions;
 
   try {
     const provider = getProvider(providerId, i18n);
     modelOptions = await provider.fetchModels();
-    spinner.stop(
-      i18n.t("setup.spinner.modelsFound", { count: modelOptions.length }),
-    );
   } catch (err) {
-    spinner.stop(i18n.t("setup.spinner.loadingModelsFailed"));
     p.log.error(err.message);
     process.exit(1);
   }
@@ -129,6 +124,8 @@ export async function runSetupScreen(context) {
     },
     paths,
   );
+
+  resetTerminalSurface();
 
   return loadConfig({ cwd, runtimeOverrides });
 }

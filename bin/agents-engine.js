@@ -2,12 +2,14 @@
 import { Router } from "../src/router.js";
 import { createI18n, resolveRuntimeLocale } from "../src/i18n/index.js";
 import { initUI } from "../src/ui/index.js";
-import { defaultTheme } from "../src/ui/theme.js";
+import { loadTheme } from "../src/ui/theme.js";
+import { APP_VERSION } from "../src/app-meta.js";
 
 async function main() {
   const { locale } = resolveRuntimeLocale();
   const i18n = createI18n({ locale, cwd: process.cwd() });
-  const ui = initUI(defaultTheme, i18n);
+  const theme = await loadTheme({ cwd: process.cwd() });
+  const ui = initUI(theme, i18n);
 
   const app = new Router(
     {
@@ -17,6 +19,7 @@ async function main() {
       runtimeOverrides: {},
       locale,
       i18n,
+      appVersion: APP_VERSION,
     },
     ui,
   );

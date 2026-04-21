@@ -6,27 +6,31 @@ const OPTIONS = [
   { value: "reject", label: "Reject" },
 ];
 
-function render(cmd, selectedIdx) {
+const APPROVAL_BLOCK_LINES = 4 + OPTIONS.length;
+
+function render(cmd, selectedIdx, rerender = false) {
+  if (rerender) {
+    process.stdout.write(`\x1b[${APPROVAL_BLOCK_LINES}A`);
+  }
   process.stdout.write("\r\x1b[J");
-  process.stdout.write(`\n  ${chalk.hex("#a855f7")("⬢ mr. mush")} wants to run\n`);
-  process.stdout.write(`    ${chalk.dim(cmd)}\n\n`);
+  process.stdout.write(`\n${chalk.hex("#a855f7")("⬢ mr. mush")} wants to run\n`);
+  process.stdout.write(`${chalk.dim(cmd)}\n\n`);
 
   OPTIONS.forEach((option, index) => {
     const pointer = index === selectedIdx ? chalk.hex("#a855f7")("❯") : " ";
     const label = index === selectedIdx ? chalk.bold(option.label) : option.label;
-    process.stdout.write(`    ${pointer} ${label}\n`);
+    process.stdout.write(`${pointer} ${label}\n`);
   });
-
-  process.stdout.write(`\x1b[${OPTIONS.length}A`);
 }
 
 function clear() {
-  process.stdout.write(`\x1b[4A\r\x1b[J`);
+  process.stdout.write(`\x1b[${APPROVAL_BLOCK_LINES}A\r\x1b[J`);
 }
 
 export async function requestBashApproval(cmd) {
   return new Promise((resolve) => {
     let selectedIdx = 0;
+    let hasRendered = false;
 
     process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -51,16 +55,19 @@ export async function requestBashApproval(cmd) {
       }
       if (key === "\x1b[A") {
         selectedIdx = (selectedIdx - 1 + OPTIONS.length) % OPTIONS.length;
-        render(cmd, selectedIdx);
+        render(cmd, selectedIdx, hasRendered);
+        hasRendered = true;
         return;
       }
       if (key === "\x1b[B") {
         selectedIdx = (selectedIdx + 1) % OPTIONS.length;
-        render(cmd, selectedIdx);
+        render(cmd, selectedIdx, hasRendered);
+        hasRendered = true;
       }
     }
 
     process.stdin.on("data", onData);
     render(cmd, selectedIdx);
+    hasRendered = true;
   });
 }
