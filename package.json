@@ -15,6 +15,12 @@
     "chalk": "^5.4.1",
     "figures": "^6.1.0",
     "smol-toml": "^1.6.1",
+    "tree-sitter-javascript": "^0.23.1",
+    "tree-sitter-python": "^0.23.6",
+    "tree-sitter-typescript": "^0.23.2",
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageserver-protocol": "^3.17.5",
+    "web-tree-sitter": "^0.24.7",
     "xstate": "^5.30.0",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"

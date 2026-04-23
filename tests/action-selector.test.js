@@ -27,6 +27,15 @@ test("classifyPrompt short greeting stays heuristic and avoids router escalation
   assert.equal(result.confidence, 0.99);
 });
 
+test("classifyPrompt project structure questions stay on heuristic analysis path", () => {
+  const result = classifyPrompt("что это за проект? какая его карта?");
+
+  assert.equal(result.domain, "analysis");
+  assert.equal(result.action, "explain");
+  assert.equal(result.source, "heuristic");
+  assert.equal(result.confidence, 0.97);
+});
+
 test("selectAction prefers provider JSON result when heuristic is weak", async () => {
   const fakeProvider = {
     id: "anthropic",

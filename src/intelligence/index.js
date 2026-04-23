@@ -1,0 +1,208 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+
+import { buildRepoMap } from "./repo-map.js";
+
+const REPO_INTELLIGENCE_PATTERNS = [
+  /repo\s*map/i,
+  /repository\s+map/i,
+  /repo\s+structure/i,
+  /repository\s+structure/i,
+  /what\s+is\s+this\s+project/i,
+  /what\s+project\s+is\s+this/i,
+  /describe\s+this\s+project/i,
+  /карт[аы].*репозит/i,
+  /структур[аы].*репозит/i,
+  /что\s+это\s+за\s+проект/i,
+  /что\s+это\s+за\s+репозитор/i,
+  /какая.*карт/i,
+  /опиши.*проект/i,
+];
+
+function wrapRepoMap(text) {
+  if (!text?.trim()) return "";
+
+  return [
+    "Repository map context:",
+    "This is a generated high-level map of the current repository.",
+    "Use this map before calling tools for high-level structure questions.",
+    "If the user asks about repository structure, modules, files, symbols, or 'the repo map', answer from this map first.",
+    "Only call filesystem tools if the map is clearly insufficient for the user's request.",
+    "",
+    text.trim(),
+  ].join("\n");
+}
+
+function normalizePrompt(prompt) {
+  return String(prompt ?? "").trim();
+}
+
+function isFileLine(line) {
+  return line
+    && !line.startsWith("  ")
+    && line !== "Repository map:"
+    && line !== "Repository map context:"
+    && !line.startsWith("This is a generated")
+    && !line.startsWith("Use this map before")
+    && !line.startsWith("If the user asks")
+    && !line.startsWith("Only call filesystem")
+    && !line.startsWith("Answer high-level")
+    && !line.startsWith("Prefer concise");
+}
+
+function extractRepoMapEntries(repoMapText) {
+  const lines = String(repoMapText ?? "").split("\n");
+  const entries = [];
+  let current = null;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    if (!line.trim()) continue;
+
+    if (isFileLine(line)) {
+      current = {
+        file: line.trim(),
+        symbols: [],
+      };
+      entries.push(current);
+      continue;
+    }
+
+    if (line.startsWith("  ") && current) {
+      current.symbols.push(line.trim());
+    }
+  }
+
+  return entries;
+}
+
+function groupRepoAreas(entries) {
+  const areaDefinitions = [
+    ["config", /^src\/config\//, "конфигурация, state и prompt stack"],
+    ["providers", /^src\/providers\//, "интеграции с LLM-провайдерами"],
+    ["ui", /^src\/ui\//, "терминальный UI, setup и chat-сцены"],
+    ["commands", /^src\/commands\//, "slash-команды и runtime overrides"],
+    ["history", /^src\/history\//, "история сессий, store и usage-метрики"],
+    ["orchestrator", /^src\/orchestrator\//, "маршрутизация задач и worker orchestration"],
+    ["intelligence", /^src\/intelligence\//, "AST-парсинг и генерация карты репозитория"],
+    ["tools", /^src\/tools\//, "tool loop и вызовы bash/write_file"],
+  ];
+
+  return areaDefinitions
+    .map(([key, pattern, description]) => ({
+      key,
+      description,
+      files: entries.filter((entry) => pattern.test(entry.file)),
+    }))
+    .filter((entry) => entry.files.length > 0)
+    .slice(0, 6);
+}
+
+function topFileEntries(entries, maxFiles = 6) {
+  return entries
+    .slice(0, maxFiles)
+    .map((entry) => ({
+      file: entry.file,
+      symbols: entry.symbols
+        .filter((symbol) => !symbol.startsWith("import "))
+        .slice(0, 4),
+    }));
+}
+
+async function readProjectMetadata(cwd) {
+  try {
+    const packageJsonPath = path.join(cwd, "package.json");
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+    return {
+      name: packageJson.name ?? path.basename(cwd),
+      isCli: Boolean(packageJson.bin),
+      isEsm: packageJson.type === "module",
+    };
+  } catch {
+    return {
+      name: path.basename(cwd),
+      isCli: false,
+      isEsm: false,
+    };
+  }
+}
+
+function buildProjectLead(metadata, entries) {
+  const hasProviders = entries.some((entry) => entry.file.startsWith("src/providers/"));
+  const hasTerminalUi = entries.some((entry) => entry.file.startsWith("src/ui/"));
+  const hasOrchestrator = entries.some((entry) => entry.file.startsWith("src/orchestrator/"));
+  const hasIntelligence = entries.some((entry) => entry.file.startsWith("src/intelligence/"));
+
+  const parts = [];
+  if (metadata.isEsm) parts.push("Node.js ESM");
+  if (metadata.isCli || hasTerminalUi) parts.push("CLI");
+  if (hasProviders) parts.push("для работы с LLM-провайдерами");
+  if (hasOrchestrator) parts.push("с маршрутизацией через оркестратор");
+  if (hasIntelligence) parts.push("и встроенной code-intelligence картой репозитория");
+
+  const descriptor = parts.length > 0
+    ? parts.join(" ")
+    : "проект для работы с кодовой базой";
+
+  return `Это проект ${metadata.name} - ${descriptor}.`;
+}
+
+export function isRepoIntelligencePrompt(prompt) {
+  const normalized = normalizePrompt(prompt);
+  return REPO_INTELLIGENCE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+export function buildRepoMapAnswer(repoMapText, prompt, metadata = {}) {
+  if (!isRepoIntelligencePrompt(prompt)) return "";
+
+  const entries = extractRepoMapEntries(repoMapText);
+  if (entries.length === 0) return "";
+
+  const projectLead = buildProjectLead(
+    {
+      name: metadata.name ?? path.basename(metadata.cwd ?? process.cwd()),
+      isCli: metadata.isCli ?? false,
+      isEsm: metadata.isEsm ?? false,
+    },
+    entries,
+  );
+  const areas = groupRepoAreas(entries);
+  const topFiles = topFileEntries(entries);
+
+  const lines = [projectLead, ""];
+
+  if (areas.length > 0) {
+    lines.push("Ключевые зоны:");
+    for (const area of areas) {
+      lines.push(`- \`${area.files[0].file.split("/").slice(0, 2).join("/")}/\` - ${area.description}`);
+    }
+    lines.push("");
+  }
+
+  lines.push("Краткая карта:");
+  for (const entry of topFiles) {
+    lines.push(`\`${entry.file}\``);
+    for (const symbol of entry.symbols) {
+      lines.push(`- ${symbol}`);
+    }
+  }
+
+  return lines.join("\n").trim();
+}
+
+export async function getRepoMapText(cwd, options = {}) {
+  try {
+    const text = await buildRepoMap(cwd, options);
+    return wrapRepoMap(text);
+  } catch {
+    return "";
+  }
+}
+
+export async function buildRepoMapAnswerForPrompt(cwd, repoMapText, prompt) {
+  const metadata = await readProjectMetadata(cwd);
+  return buildRepoMapAnswer(repoMapText, prompt, {
+    cwd,
+    ...metadata,
+  });
+}

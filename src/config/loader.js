@@ -4,6 +4,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
+import { getRepoMapText } from "../intelligence/index.js";
 import {
   builtInConfig,
   DEFAULT_STATUSBAR_TEMPLATE,
@@ -300,6 +301,7 @@ function toUserConfig(config) {
     auth: config.auth,
     cache: config.cache,
     orchestrator: config.orchestrator,
+    intelligence: config.intelligence,
     tools: config.tools,
     providers: config.providers,
     prompts: config.prompts,
@@ -347,8 +349,17 @@ export async function resolvePromptStack(resolvedConfig, cwd = process.cwd()) {
   const profile = resolvedConfig.activeProfile;
   const providerId = resolvedConfig.activeProvider;
   const bashEnabled = resolvedConfig.tools?.bash?.enabled ?? builtInConfig.tools.bash.enabled;
+  const repoMapEnabled =
+    resolvedConfig.intelligence?.repo_map?.enabled
+    ?? builtInConfig.intelligence.repo_map.enabled;
   const agentsEngineFile = await findProjectFileUpwards(cwd, "MRMUSH.md");
   const agentsFile = await findProjectFileUpwards(cwd, "AGENTS.md");
+  const repoMapText = repoMapEnabled
+    ? await getRepoMapText(cwd, {
+        tokenBudget: resolvedConfig.intelligence?.repo_map?.token_budget,
+        deniedPaths: resolvedConfig.intelligence?.repo_map?.denied_paths,
+      })
+    : "";
   const layers = [
     { id: "project-mrmush", source: agentsEngineFile, content: agentsEngineFile ? await maybeReadText(agentsEngineFile) : null },
     { id: "built-in", source: "built-in", content: DEFAULT_SYSTEM_PROMPT },
@@ -356,6 +367,7 @@ export async function resolvePromptStack(resolvedConfig, cwd = process.cwd()) {
     { id: "profile", source: paths.profilePromptFile(profile), content: await maybeReadText(paths.profilePromptFile(profile)) },
     { id: "provider", source: paths.providerPromptFile(providerId), content: await maybeReadText(paths.providerPromptFile(providerId)) },
     { id: "project-agents", source: agentsFile, content: agentsFile ? await maybeReadText(agentsFile) : null },
+    { id: "repo-map", source: "repo-map", content: repoMapText },
     {
       id: "tools-file-ops",
       source: fileURLToPath(TOOLS_FILE_OPS_PROMPT_URL),
@@ -409,6 +421,8 @@ export async function loadConfig({ cwd = process.cwd(), env = process.env, runti
     paths,
     activeProfile,
     activeProvider,
+    intelligence: validated.intelligence,
+    tools: validated.tools,
   }, cwd);
   const state = await loadState(paths);
 

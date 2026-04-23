@@ -77,6 +77,23 @@ const orchestratorSchema = z.object({
   router_model: z.string().min(1).default("claude-haiku-4-5-20251001"),
 }).strict();
 
+const intelligenceSchema = z.object({
+  repo_map: z.object({
+    enabled: z.boolean().default(true),
+    token_budget: z.number().int().positive().default(2000),
+    denied_paths: z.array(z.string().min(1)).default([
+      "test",
+      "tests",
+      "node_modules",
+      ".git",
+      ".mrmush",
+      "coverage",
+      "dist",
+      "build",
+    ]),
+  }).default({}),
+}).strict();
+
 const toolsSchema = z.object({
   bash: z.object({
     enabled: z.boolean().default(true),
@@ -124,6 +141,7 @@ export const userConfigSchema = z.object({
   auth: authSchema.default({}),
   cache: cacheSchema.default({}),
   orchestrator: orchestratorSchema.default({}),
+  intelligence: intelligenceSchema.default({}),
   tools: toolsSchema,
   providers: z.object({
     openai: providerSettingsSchema.default({}),
@@ -147,6 +165,22 @@ export const builtInConfig = Object.freeze(userConfigSchema.parse({
     enabled: true,
     router_provider: "anthropic",
     router_model: "claude-haiku-4-5-20251001",
+  },
+  intelligence: {
+    repo_map: {
+      enabled: true,
+      token_budget: 2000,
+      denied_paths: [
+        "test",
+        "tests",
+        "node_modules",
+        ".git",
+        ".mrmush",
+        "coverage",
+        "dist",
+        "build",
+      ],
+    },
   },
   tools: {
     bash: {

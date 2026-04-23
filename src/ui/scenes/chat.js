@@ -6,6 +6,7 @@ import { getProvider } from "../../providers/index.js";
 import { createPassiveInputBuffer, promptInput } from "../input.js";
 import { DOT_CHOICES, executeCommand } from "../../commands/index.js";
 import { loadConfig, saveState } from "../../config/loader.js";
+import { buildRepoMapAnswerForPrompt, isRepoIntelligencePrompt } from "../../intelligence/index.js";
 import { createTaskActor, waitForTaskActor } from "../../orchestrator/index.js";
 import { runProviderWithTools } from "../../tools/orchestrator.js";
 import { createSession, recordMessage } from "../../history/session.js";
@@ -657,6 +658,55 @@ function formatDebugBlock(message) {
     .join("\n");
 }
 
+function formatNumberedDebugBlock(step, message) {
+  const lines = formatDebugBlock(message).split("\n");
+  if (lines.length === 0) return `${step}.`;
+  return [
+    `${step}. ${lines[0]}`,
+    ...lines.slice(1),
+  ].join("\n");
+}
+
+function summarizeRepoMapLayer(config, promptStack) {
+  const enabled = config?.intelligence?.repo_map?.enabled ?? false;
+  if (!enabled) {
+    return "intelligence: repo-map disabled";
+  }
+
+  const repoLayer = promptStack?.layers?.find((layer) => layer.id === "repo-map");
+  if (!repoLayer) {
+    return "intelligence: repo-map layer missing";
+  }
+
+  const content = String(repoLayer.content ?? "").trim();
+  if (!content) {
+    return "intelligence: repo-map enabled but empty";
+  }
+
+  const lines = content.split("\n");
+  const fileLines = lines.filter((line) => (
+    line
+    && !line.startsWith("  ")
+    && line !== "Repository map:"
+    && line !== "Repository map context:"
+    && !line.startsWith("This is a generated")
+    && !line.startsWith("Use this map before")
+    && !line.startsWith("If the user asks")
+    && !line.startsWith("Only call filesystem")
+  ));
+  const previewFiles = fileLines.slice(0, 3).join(", ");
+  const approxTokens = Math.ceil(content.length / 4);
+
+  return [
+    `intelligence: repo-map attached tokens~=${approxTokens} files=${fileLines.length}`,
+    previewFiles ? `intelligence: top files ${previewFiles}` : null,
+  ].filter(Boolean).join("\n");
+}
+
+function getRepoMapLayer(promptStack) {
+  return promptStack?.layers?.find((layer) => layer.id === "repo-map") ?? null;
+}
+
 // ─── Main loop ────────────────────────────────────────────────────────────────
 
 export async function runChatScreen(context) {
@@ -666,6 +716,7 @@ export async function runChatScreen(context) {
   let lastTokens = "–";
   let passiveInput = null;
   let resizeHandler = null;
+  let debugStepCounter = 0;
 
   context.chatSessionOrchestrator = {
     errors: context.chatSessionOrchestrator?.errors ?? 0,
@@ -715,6 +766,17 @@ export async function runChatScreen(context) {
 
   function appendEventMessage(text, meta) {
     if (!text?.trim()) return;
+    const lastEntry = transcript.at(-1);
+    if (
+      meta?.kind === "tool_event"
+      && meta?.title === "debug"
+      && lastEntry?.meta?.kind === "tool_event"
+      && lastEntry?.meta?.title === "debug"
+    ) {
+      lastEntry.text = `${lastEntry.text}\n\n${text}`;
+      redrawScreen();
+      return;
+    }
     transcript.push({ role: "assistant", text, meta });
     if (meta?.kind === "terminal_event") {
       printExpandableTerminalEventMessage({ text, meta }, context);
@@ -725,6 +787,14 @@ export async function runChatScreen(context) {
       return;
     }
     printAiMessage(text, context);
+  }
+
+  function appendDebugMessage(text) {
+    debugStepCounter += 1;
+    appendEventMessage(
+      formatNumberedDebugBlock(debugStepCounter, text),
+      createDebugEventMeta("debug"),
+    );
   }
 
   // Create a new history session
@@ -950,6 +1020,7 @@ export async function runChatScreen(context) {
       }
 
       transcript.push({ role: "user", text });
+      debugStepCounter = 0;
       context.currentSessionMetrics = {
         ...(context.currentSessionMetrics ?? {
           messageCount: 0,
@@ -1159,6 +1230,37 @@ export async function runChatScreen(context) {
           transcript,
           promptForModel,
         );
+        const repoMapLayer = getRepoMapLayer(context.config.promptStack);
+        if (context.runtimeOverrides.debug) {
+          stopPendingAnimation();
+          clearLiveRegion();
+          appendDebugMessage(
+            summarizeRepoMapLayer(context.config, context.config.promptStack),
+          );
+        }
+        let answeredFromRepoMap = false;
+        if (repoMapLayer && isRepoIntelligencePrompt(text)) {
+          const directRepoMapAnswer = await buildRepoMapAnswerForPrompt(
+            context.cwd,
+            repoMapLayer.content,
+            text,
+          );
+          if (directRepoMapAnswer) {
+            answeredFromRepoMap = true;
+            response = {
+              text: directRepoMapAnswer,
+              usage: null,
+            };
+            if (context.runtimeOverrides.debug) {
+              stopPendingAnimation();
+              clearLiveRegion();
+              appendDebugMessage("intelligence: answering directly from repo-map");
+              appendDebugMessage(
+                `response: chars=${response.text.length} usage=no stream=off source=repo-map`,
+              );
+            }
+          }
+        }
         const providerCall = {
           provider,
           config: context.config,
@@ -1223,7 +1325,7 @@ export async function runChatScreen(context) {
             }
           },
         };
-        if (context.config.orchestrator?.enabled) {
+        if (!response && context.config.orchestrator?.enabled) {
           const routerProviderId =
             context.config.orchestrator?.router_provider
             ?? context.runtimeOverrides.providerId
@@ -1251,10 +1353,7 @@ export async function runChatScreen(context) {
                 ? (message) => {
                     stopPendingAnimation();
                     clearLiveRegion();
-                    appendEventMessage(
-                      formatDebugBlock(message),
-                      createDebugEventMeta("debug"),
-                    );
+                    appendDebugMessage(message);
                   }
                 : null,
             },
@@ -1269,12 +1368,11 @@ export async function runChatScreen(context) {
 
               stopPendingAnimation();
               clearLiveRegion();
-              appendEventMessage(
+              appendDebugMessage(
                 formatOrchestratorDebugLine(snapshot, {
                   providerId,
                   routerProviderId,
                 }),
-                createDebugEventMeta("debug"),
               );
             });
           }
@@ -1300,16 +1398,46 @@ export async function runChatScreen(context) {
             openedAt: null,
           };
           response = snapshot.output?.result ?? snapshot.context.result;
-        } else {
+        } else if (!response) {
           if (context.runtimeOverrides.debug) {
             stopPendingAnimation();
             clearLiveRegion();
-            appendEventMessage(
+            appendDebugMessage(
               `orchestrator: disabled, using direct provider=${providerId}`,
-              createDebugEventMeta("debug"),
             );
           }
           response = await runProviderWithTools(providerCall);
+        }
+        if (context.runtimeOverrides.debug && !answeredFromRepoMap) {
+          stopPendingAnimation();
+          clearLiveRegion();
+          appendDebugMessage(
+            `response: chars=${response?.text?.length ?? 0} usage=${response?.usage ? "yes" : "no"} stream=${shouldStream ? "on" : "off"}`,
+          );
+        }
+        if (
+          shouldStream
+          && (!response?.text || response.text.trim().length === 0)
+          && provider.source === "api"
+        ) {
+          if (context.runtimeOverrides.debug) {
+            stopPendingAnimation();
+            clearLiveRegion();
+            appendDebugMessage(
+              "response: empty after streaming, retrying once without stream",
+            );
+          }
+          response = await runProviderWithTools({
+            ...providerCall,
+            onToken: null,
+          });
+          if (context.runtimeOverrides.debug) {
+            stopPendingAnimation();
+            clearLiveRegion();
+            appendDebugMessage(
+              `response: retry chars=${response?.text?.length ?? 0} usage=${response?.usage ? "yes" : "no"} stream=off`,
+            );
+          }
         }
         lastTokens = formatUsage(response.usage);
         await saveState(

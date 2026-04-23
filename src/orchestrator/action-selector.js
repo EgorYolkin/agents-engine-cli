@@ -16,6 +16,22 @@ const TRIVIAL_GENERAL_PATTERNS = [
   /^(bye|goodbye|пока|до свидания)$/i,
 ];
 
+const REPO_MAP_PATTERNS = [
+  /repo\s*map/i,
+  /repository\s+map/i,
+  /repo\s+structure/i,
+  /repository\s+structure/i,
+  /what\s+is\s+this\s+project/i,
+  /what\s+project\s+is\s+this/i,
+  /describe\s+this\s+project/i,
+  /карт[аы].*репозит/i,
+  /структур[аы].*репозит/i,
+  /что\s+это\s+за\s+проект/i,
+  /что\s+это\s+за\s+репозитор/i,
+  /какая.*карт/i,
+  /опиши.*проект/i,
+];
+
 function normalizePrompt(prompt) {
   return String(prompt ?? "").trim();
 }
@@ -67,6 +83,14 @@ export function classifyPrompt(prompt) {
       source: "heuristic",
     };
   }
+  if (isRepoMapPrompt(normalizedPrompt)) {
+    return {
+      domain: "analysis",
+      action: "explain",
+      confidence: 0.97,
+      source: "heuristic",
+    };
+  }
   const scores = Object.entries(DOMAINS)
     .map(([domain, keywords]) => ({
       domain,
@@ -107,6 +131,10 @@ function isTrivialGeneralPrompt(prompt) {
 
   const wordCount = compact.split(" ").filter(Boolean).length;
   return compact.length <= 16 && wordCount <= 3 && !/[!?.,:;]/.test(compact);
+}
+
+function isRepoMapPrompt(prompt) {
+  return REPO_MAP_PATTERNS.some((pattern) => pattern.test(prompt));
 }
 
 function extractJsonObject(text) {
