@@ -15,6 +15,11 @@
       "label": "Google Gemini",
       "missingEnv": "Не задана переменная {envKey}"
     },
+    "deepseek": {
+      "label": "DeepSeek API",
+      "missingEnv": "Не задана переменная {envKey}"
+    },
+    "missingEnvSuffix": "env: {envKey}",
     "notInstalledSuffix": "не установлен"
   },
   "setup": {
@@ -27,11 +32,20 @@
       "loadingModelsFailed": "Не удалось загрузить модели"
     },
     "errors": {
-      "noSupportedCli": "Не найден ни один поддерживаемый CLI ({binaries})"
+      "noSupportedCli": "Не найден ни один поддерживаемый CLI ({binaries})",
+      "apiKeyRequired": "Токен обязателен"
     },
     "prompts": {
       "provider": "Выберите провайдера:",
-      "model": "Выберите модель:"
+      "routerProvider": "Выберите провайдера для оркестратора:",
+      "model": "Выберите модель:",
+      "routerModel": "Выберите модель для оркестратора:",
+      "apiKeySource": "{envKey} задан. Какой токен использовать?",
+      "apiKey": "Введите API-токен {provider}:"
+    },
+    "options": {
+      "useEnvToken": "Использовать текущий {envKey}",
+      "enterNewToken": "Ввести новый токен"
     }
   },
   "chat": {
@@ -49,7 +63,7 @@
       "aborted": "прервано"
     },
     "errors": {
-      "requestFailed": "Ошибка: {message}"
+      "requestFailed": "✖ Ошибка: {message}"
     }
   },
   "thinking": {
@@ -76,16 +90,19 @@
       "model": "Переключить активную модель",
       "profile": "Переключить активный профиль",
       "prompt": "Просмотреть или изменить prompt layers",
-      "session": "Показать метрики текущей сессии",
       "usage": "Показать общую usage статистику",
+      "debug": "Переключить debug-режим",
       "statusbar": "Настроить status bar",
       "dot": "Выбрать маркер сообщений",
       "resume": "Открыть браузер сессий",
       "card": "Показать карточку гриба",
-      "inittheme": "Создать theme.yaml для проекта"
+      "inittheme": "Создать theme.yaml для проекта",
+      "onboard": "Запустить настройку заново"
     },
     "args": {
       "off": "Без reasoning",
+      "on": "Включить",
+      "offToggle": "Выключить",
       "minimal": "Минимальный reasoning",
       "low": "Низкий уровень",
       "medium": "Средний уровень",
@@ -102,32 +119,15 @@
       "providerSet": "provider: {providerId}",
       "modelSet": "model: {model}",
       "profileSet": "profile: {profile}",
+      "debugSet": "debug: {mode}",
       "dotSet": "dot: {dot}",
       "statusbarSet": "statusbar: {prompt}",
       "promptEdited": "prompt edited: {layer}",
       "promptReset": "prompt reset: {layer}",
       "promptHeader": "# {layer}",
       "sessionResumed": "сессия загружена: {title}",
-      "themeInitialized": "theme initialized: {path}"
-    },
-    "cards": {
-      "session": {
-        "id": "session",
-        "title": "title",
-        "provider": "provider",
-        "time": "time",
-        "messages": "messages u/a",
-        "tokens": "tokens",
-        "updated": "updated"
-      },
-      "usage": {
-        "sessions": "sessions",
-        "time": "time",
-        "messages": "messages u/a",
-        "tokens": "tokens",
-        "input": "input",
-        "output": "output"
-      }
+      "themeInitialized": "theme initialized: {path}",
+      "onboardCompleted": "настройка завершена: {providerId}/{model}, роутер: {routerProviderId}"
     },
     "errors": {
       "unknownPromptLayer": "Неизвестный prompt layer: {layer}",
@@ -138,7 +138,6 @@
       "usageModelUse": "Использование: /model use <slug>",
       "usageProfileUse": "Использование: /profile use <name>",
       "usageStatusbar": "Использование: /statusbar <template>, например /statusbar {folder} | {model} | {thinking} | {messages} msgs | {session_tokens} tok | {session_time}",
-      "noActiveSession": "нет активной сессии",
       "unknownPromptSubcommand": "Неизвестная команда /prompt {subcommand}",
       "themeAlreadyExists": "theme file already exists: {path}"
     }

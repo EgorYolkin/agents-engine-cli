@@ -12,7 +12,7 @@ export const googleProvider = {
   async fetchModels(resolvedConfig = null) {
     const envKey = resolvedConfig?.auth?.google?.env_key ?? "GEMINI_API_KEY";
     const i18n = resolvedConfig?.i18n ?? null;
-    const apiKey = process.env[envKey];
+    const apiKey = resolvedConfig?.auth?.google?.api_key ?? process.env[envKey];
     if (!apiKey) {
       const message = i18n
         ? i18n.t("providers.google.missingEnv", { envKey })
@@ -42,7 +42,7 @@ export const googleProvider = {
   async exec(resolvedConfig, prompt, runtimeOverrides = {}, signal = null, options = {}) {
     const model = runtimeOverrides.model ?? resolvedConfig.activeModel;
     const envKey = resolvedConfig.auth.google.env_key;
-    const apiKey = process.env[envKey];
+    const apiKey = resolvedConfig.auth.google.api_key ?? process.env[envKey];
     if (!apiKey) {
       throw new Error(
         resolvedConfig.i18n.t("providers.google.missingEnv", { envKey }),

@@ -1,13 +1,24 @@
 import { approveCommand, isCommandApproved } from "./approvals.js";
-import { requestBashApproval } from "./approval-ui.js";
+import { requestBashApproval, requestWriteApproval } from "./approval-ui.js";
 import { runBashCommand } from "./bash.js";
+import { evaluateWritePolicy, readExistingFile, writeFile } from "./file-write.js";
 import { formatToolResultForModel, parseToolCall } from "./parser.js";
 import { evaluateBashPolicy } from "./policy.js";
 
-function toolErrorResult(cmd, message) {
+function toolErrorResult(call, message) {
+  if (call?.name === "write_file") {
+    return {
+      tool: "write_file",
+      path: call.args.path,
+      written: 0,
+      error: message,
+      blocked: true,
+    };
+  }
+
   return {
     tool: "bash",
-    cmd,
+    cmd: call?.args?.cmd ?? "",
     exit_code: null,
     stdout: "",
     stderr: message,
@@ -30,6 +41,14 @@ function buildFollowupPrompt({ originalPrompt, assistantText, toolResult }) {
   ].join("\n");
 }
 
+function markerSuffixLength(value, marker) {
+  const maxLength = Math.min(value.length, marker.length - 1);
+  for (let length = maxLength; length > 0; length -= 1) {
+    if (marker.startsWith(value.slice(-length))) return length;
+  }
+  return 0;
+}
+
 export async function runProviderWithTools({
   provider,
   config,
@@ -42,9 +61,12 @@ export async function runProviderWithTools({
   beforeApproval = null,
   afterApproval = null,
   beforeToolCall = null,
+  onAssistantToolIntent = null,
+  onToolResult = null,
 }) {
-  const toolConfig = config.tools?.bash ?? {};
-  const maxCalls = toolConfig.max_calls ?? 3;
+  const bashToolConfig = config.tools?.bash ?? {};
+  const fileToolConfig = config.tools?.files ?? {};
+  const maxCalls = bashToolConfig.max_calls ?? 8;
   let currentPrompt = prompt;
   let lastResponse = null;
 
@@ -56,15 +78,18 @@ export async function runProviderWithTools({
       ? (token) => {
           if (suppressStreaming) return;
           tokenBuffer += token;
-          const trimmed = tokenBuffer.trimStart();
-          if (marker.startsWith(trimmed) && trimmed.length < marker.length) return;
-          if (trimmed.startsWith(marker)) {
+          const markerIndex = tokenBuffer.indexOf(marker);
+          if (markerIndex >= 0) {
+            const visibleText = tokenBuffer.slice(0, markerIndex);
+            if (visibleText) onToken(visibleText);
             suppressStreaming = true;
             tokenBuffer = "";
             return;
           }
-          onToken(tokenBuffer);
-          tokenBuffer = "";
+          const holdLength = markerSuffixLength(tokenBuffer, marker);
+          const visibleText = tokenBuffer.slice(0, tokenBuffer.length - holdLength);
+          if (visibleText) onToken(visibleText);
+          tokenBuffer = tokenBuffer.slice(tokenBuffer.length - holdLength);
         }
       : null;
 
@@ -82,39 +107,81 @@ export async function runProviderWithTools({
       if (tokenBuffer && onToken) onToken(tokenBuffer);
       return response;
     }
+    tokenBuffer = "";
     if (beforeToolCall) beforeToolCall();
+    if (parsed.ok && onAssistantToolIntent) {
+      await onAssistantToolIntent({
+        assistantText: parsed.before ?? "",
+        toolCall: parsed.call,
+      });
+    }
 
     let toolResult;
     if (!parsed.ok) {
-      toolResult = toolErrorResult("", parsed.error);
-    } else if (!toolConfig.enabled) {
-      toolResult = toolErrorResult(parsed.call.args.cmd, "bash tool is disabled");
+      toolResult = toolErrorResult(null, parsed.error);
     } else if (callIndex >= maxCalls) {
-      toolResult = toolErrorResult(parsed.call.args.cmd, `tool call limit exceeded (${maxCalls})`);
+      toolResult = toolErrorResult(parsed.call, `tool call limit exceeded (${maxCalls})`);
     } else {
-      const cmd = parsed.call.args.cmd;
-      const policy = evaluateBashPolicy(cmd, toolConfig);
-      if (!policy.ok) {
-        toolResult = toolErrorResult(cmd, policy.error);
-      } else {
-        const approved = await isCommandApproved(context.cwd, cmd);
-        if (!approved && beforeApproval) beforeApproval();
-        let approval = approved ? "always" : await requestBashApproval(cmd);
-        if (!approved && afterApproval) afterApproval();
-        if (approval === "always" && !approved) {
-          await approveCommand(context.cwd, cmd);
-        }
-        if (approval === "reject") {
-          toolResult = toolErrorResult(cmd, "User rejected tool execution");
+      if (parsed.call.name === "bash") {
+        if (!bashToolConfig.enabled) {
+          toolResult = toolErrorResult(parsed.call, "bash tool is disabled");
         } else {
-          toolResult = await runBashCommand({
-            argv: policy.argv,
-            cmd,
-            cwd: context.cwd,
-            timeoutMs: toolConfig.timeout_ms ?? 30_000,
-            maxOutputChars: toolConfig.max_output_chars ?? 20_000,
-          });
+          const cmd = parsed.call.args.cmd;
+          const policy = evaluateBashPolicy(cmd, bashToolConfig);
+          if (!policy.ok) {
+            toolResult = toolErrorResult(parsed.call, policy.error);
+          } else {
+            const approved = await isCommandApproved(context.cwd, cmd);
+            if (!approved && beforeApproval) beforeApproval();
+            const approval = approved ? "always" : await requestBashApproval(cmd);
+            if (!approved && afterApproval) afterApproval();
+            if (approval === "always" && !approved) {
+              await approveCommand(context.cwd, cmd);
+            }
+            if (approval === "reject") {
+              toolResult = toolErrorResult(parsed.call, "User rejected tool execution");
+            } else {
+              toolResult = await runBashCommand({
+                argv: policy.argv,
+                cmd,
+                cwd: context.cwd,
+                timeoutMs: bashToolConfig.timeout_ms ?? 30_000,
+                maxOutputChars: bashToolConfig.max_output_chars ?? 20_000,
+                shell: policy.shell ?? false,
+              });
+            }
+          }
         }
+      } else if (parsed.call.name === "write_file") {
+        if (!fileToolConfig.write_enabled) {
+          toolResult = toolErrorResult(parsed.call, "write_file tool is disabled");
+        } else {
+          const policy = evaluateWritePolicy(parsed.call.args.path, context.cwd, {
+            ...fileToolConfig,
+            content: parsed.call.args.content,
+          });
+          if (!policy.ok) {
+            toolResult = toolErrorResult(parsed.call, policy.error);
+          } else {
+            const existingContent = await readExistingFile(policy.resolved);
+            if (beforeApproval) beforeApproval();
+            const approval = await requestWriteApproval({
+              ...parsed.call.args,
+              existingContent,
+            });
+            if (afterApproval) afterApproval();
+            if (approval === "reject") {
+              toolResult = toolErrorResult(parsed.call, "User rejected write");
+            } else {
+              toolResult = await writeFile({
+                ...parsed.call.args,
+                cwd: context.cwd,
+              });
+            }
+          }
+        }
+      } else {
+        toolResult = toolErrorResult(parsed.call, `Unsupported tool: ${parsed.call.name}`);
       }
     }
 
@@ -123,6 +190,13 @@ export async function runProviderWithTools({
       assistantText: response.text ?? "",
       toolResult,
     });
+    if (onToolResult && parsed.ok) {
+      await onToolResult({
+        assistantText: parsed.before ?? "",
+        toolCall: parsed.call,
+        toolResult,
+      });
+    }
   }
 
   return lastResponse ?? { text: "", usage: null };

@@ -11,9 +11,10 @@ import {
   saveConfigPatch,
 } from "../config/loader.js";
 import { openSessionBrowser } from "../history/browser.js";
-import { aggregateSessionSummaries, formatDuration, formatTokenCount } from "../history/metrics.js";
+import { aggregateSessionSummaries, formatTokenCount } from "../history/metrics.js";
 import { listSessions, loadSession } from "../history/session.js";
 import { printMushCard } from "../ui/mush-card.js";
+import { runSetupScreen, selectProviderAndModel } from "../ui/scenes/setup.js";
 import { createThemeTemplate } from "../ui/theme.js";
 
 export const DOT_CHOICES = [
@@ -40,9 +41,17 @@ export const COMMANDS = [
   { name: "prompt", descriptionKey: "commands.descriptions.prompt" },
   { name: "resume", descriptionKey: "commands.descriptions.resume" },
   { name: "card", descriptionKey: "commands.descriptions.card" },
-  { name: "session", descriptionKey: "commands.descriptions.session" },
   { name: "usage", descriptionKey: "commands.descriptions.usage" },
+  {
+    name: "debug",
+    descriptionKey: "commands.descriptions.debug",
+    args: [
+      { value: "on", descriptionKey: "commands.args.on" },
+      { value: "off", descriptionKey: "commands.args.offToggle" },
+    ]
+  },
   { name: "inittheme", descriptionKey: "commands.descriptions.inittheme" },
+  { name: "onboard", descriptionKey: "commands.descriptions.onboard" },
   { name: "statusbar", descriptionKey: "commands.descriptions.statusbar" },
   {
     name: "dot",
@@ -95,10 +104,6 @@ const EFFORT_MAP = {
 
 function successResult(message) {
   return { handled: true, message };
-}
-
-function silentResult() {
-  return { handled: true };
 }
 
 function renderedResult() {
@@ -161,16 +166,28 @@ function formatConfigView(config, runtimeOverrides) {
   );
 }
 
-function formatDateTime(iso) {
-  if (!iso) return "–";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "–";
-  return date.toISOString().replace("T", " ").slice(0, 16);
-}
-
 function renderStatsCard(context, rows) {
   process.stdout.write("\n");
   printMushCard(context, rows);
+}
+
+function formatCwd(cwd) {
+  const home = os.homedir();
+  return cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
+}
+
+function renderUsageTemplate(template, values) {
+  return template
+    .replaceAll("{model}", values.model)
+    .replaceAll("{project}", values.project)
+    .replaceAll("{sessions}", values.sessions)
+    .replaceAll("{messages}", values.messages)
+    .replaceAll("{messages_ua}", values.messagesUa)
+    .replaceAll("{input_tokens}", values.inputTokens)
+    .replaceAll("{output_tokens}", values.outputTokens)
+    .replaceAll("{total_tokens}", values.totalTokens)
+    .split("\n")
+    .map((line) => ({ text: line }));
 }
 
 export async function executeCommand(text, context) {
@@ -242,6 +259,25 @@ export async function executeCommand(text, context) {
       });
 
       return successResult(i18n.t("commands.messages.statusbarSet", { prompt }));
+    }
+    case "debug": {
+      const nextValue =
+        arg === "on"
+          ? true
+          : arg === "off"
+            ? false
+            : !(context.runtimeOverrides.debug ?? false);
+
+      context.runtimeOverrides = {
+        ...context.runtimeOverrides,
+        debug: nextValue,
+      };
+
+      return successResult(
+        i18n.t("commands.messages.debugSet", {
+          mode: nextValue ? "on" : "off",
+        }),
+      );
     }
     case "config": {
       const sub = argParts[0] ?? "show";
@@ -327,15 +363,52 @@ export async function executeCommand(text, context) {
       );
     }
     case "model": {
-      if (argParts[0] !== "use" || !argParts[1]) {
+      if (argParts.length > 0 && argParts[0] !== "use") {
         return errorResult(i18n.t("commands.errors.usageModelUse"), i18n);
+      }
+
+      let selection;
+      try {
+        selection = await selectProviderAndModel(context);
+      } catch (error) {
+        return errorResult(error.message, i18n);
+      }
+
+      if (!selection) {
+        return renderedResult();
       }
 
       context.runtimeOverrides = {
         ...context.runtimeOverrides,
-        model: argParts[1]
+        providerId: selection.providerId,
+        model: selection.model,
+        config: {
+          ...(context.runtimeOverrides.config ?? {}),
+          auth: {
+            ...(context.runtimeOverrides.config?.auth ?? {}),
+            ...(selection.authPatch ?? {}),
+          },
+        },
       };
-      return successResult(i18n.t("commands.messages.modelSet", { model: argParts[1] }));
+
+      if (selection.authPatch) {
+        await saveConfig(
+          {
+            ...config,
+            auth: {
+              ...config.auth,
+              ...selection.authPatch,
+            },
+          },
+          config.paths,
+        );
+      }
+
+      return successResult(
+        i18n.t("commands.messages.modelSet", {
+          model: `${selection.providerId}/${selection.model}`,
+        }),
+      );
     }
     case "profile": {
       if (argParts[0] !== "use" || !argParts[1]) {
@@ -416,44 +489,39 @@ export async function executeCommand(text, context) {
       printMushCard(context);
       return successResult("Card rendered.");
     }
-    case "session": {
-      const sessionId = context.currentSession?.id;
-      if (!sessionId) {
-        return errorResult(i18n.t("commands.errors.noActiveSession"), i18n);
-      }
-      const liveMeta = context.currentSessionMeta ?? {};
-      const liveMetrics = context.currentSessionMetrics ?? {};
-      const provider = context.runtimeOverrides?.providerId ?? context.config?.activeProvider ?? liveMeta.provider ?? "–";
-      const model = context.runtimeOverrides?.model ?? context.config?.activeModel ?? liveMeta.model ?? "–";
-      const createdAt = liveMeta.createdAt ?? context.currentSessionStartedAt ?? null;
-      const durationMs = createdAt
-        ? Math.max(0, Date.now() - new Date(createdAt).getTime())
-        : (liveMeta.durationMs ?? 0);
-      renderStatsCard(context, [
-        { text: `⬢  ${i18n.t("commands.cards.session.id")}: ${sessionId}` },
-        { text: `⬢  ${i18n.t("commands.cards.session.title")}: ${liveMeta.title ?? "–"}` },
-        { text: `⬢  ${i18n.t("commands.cards.session.provider")}: ${provider}/${model}` },
-        { text: `⬢  ${i18n.t("commands.cards.session.time")}: ${formatDuration(durationMs)}` },
-        { text: `⬢  ${i18n.t("commands.cards.session.messages")}: ${liveMetrics.messageCount ?? 0}` },
-        { text: `⬢  ${i18n.t("commands.cards.session.tokens")}: ${formatTokenCount(liveMetrics.totalTokens ?? 0)}` },
-        { text: `⬢  ${i18n.t("commands.cards.session.updated")}: ${formatDateTime(new Date().toISOString())}` },
-      ]);
-      return renderedResult();
-    }
     case "usage": {
       const historyDir = context.config?.paths?.historyDir ?? config.paths.historyDir;
       const sessions = await listSessions(historyDir);
       const loaded = await Promise.all(sessions.map((session) => loadSession(historyDir, session.id)));
       const totals = aggregateSessionSummaries(loaded.map((session) => session.meta ?? {}));
-      renderStatsCard(context, [
-        { text: `⬢  ${i18n.t("commands.cards.usage.sessions")}: ${totals.sessionCount}` },
-        { text: `⬢  ${i18n.t("commands.cards.usage.time")}: ${formatDuration(totals.durationMs)}` },
-        { text: `⬢  ${i18n.t("commands.cards.usage.messages")}: ${totals.messageCount} (${totals.userMessages}/${totals.assistantMessages})` },
-        { text: `⬢  ${i18n.t("commands.cards.usage.tokens")}: ${formatTokenCount(totals.totalTokens)}` },
-        { text: `⬢  ${i18n.t("commands.cards.usage.input")}: ${formatTokenCount(totals.inputTokens)}` },
-        { text: `⬢  ${i18n.t("commands.cards.usage.output")}: ${formatTokenCount(totals.outputTokens)}` },
-      ]);
+      const usagePrompt =
+        context.runtimeOverrides?.config?.ui?.usage_prompt ??
+        config.ui?.usage_prompt;
+      renderStatsCard(
+        context,
+        renderUsageTemplate(usagePrompt, {
+          model: context.runtimeOverrides?.model ?? config.activeModel ?? "–",
+          project: formatCwd(context.cwd),
+          sessions: String(totals.sessionCount),
+          messages: String(totals.messageCount),
+          messagesUa: `${totals.userMessages}/${totals.assistantMessages}`,
+          inputTokens: formatTokenCount(totals.inputTokens),
+          outputTokens: formatTokenCount(totals.outputTokens),
+          totalTokens: formatTokenCount(totals.totalTokens),
+        }),
+      );
       return renderedResult();
+    }
+    case "onboard": {
+      context.runtimeOverrides = {};
+      context.config = await runSetupScreen(context);
+      return successResult(
+        i18n.t("commands.messages.onboardCompleted", {
+          providerId: context.config.activeProvider,
+          model: context.config.activeModel,
+          routerProviderId: context.config.orchestrator?.router_provider,
+        }),
+      );
     }
     case "inittheme": {
       const filePath = config.paths.projectThemeFile;

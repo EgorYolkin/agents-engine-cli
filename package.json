@@ -6,12 +6,16 @@
     "mr-mush": "./bin/mr-mush.js",
     "mrmush": "./bin/mr-mush.js"
   },
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "@clack/prompts": "^0.9.1",
     "@messageformat/core": "^3.4.0",
     "chalk": "^5.4.1",
     "figures": "^6.1.0",
     "smol-toml": "^1.6.1",
+    "xstate": "^5.30.0",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"
   }

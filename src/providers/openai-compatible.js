@@ -22,6 +22,8 @@ function parseStreamLine(line) {
 export async function openAiCompatibleChat({
   baseUrl,
   providerName,
+  apiKey = null,
+  headers = {},
   model,
   prompt,
   promptStack = null,
@@ -37,11 +39,16 @@ export async function openAiCompatibleChat({
 
   const res = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      ...headers,
+    },
     body: JSON.stringify({
       model,
       messages: messages ?? buildMessages(promptStack, prompt),
       stream,
+      ...(stream ? { stream_options: { include_usage: true } } : {}),
     }),
     signal: abortCtrl.signal,
   });

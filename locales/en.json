@@ -15,6 +15,11 @@
       "label": "Google Gemini",
       "missingEnv": "Environment variable {envKey} is not set"
     },
+    "deepseek": {
+      "label": "DeepSeek API",
+      "missingEnv": "Environment variable {envKey} is not set"
+    },
+    "missingEnvSuffix": "env: {envKey}",
     "notInstalledSuffix": "not installed"
   },
   "setup": {
@@ -27,11 +32,20 @@
       "loadingModelsFailed": "Failed to load models"
     },
     "errors": {
-      "noSupportedCli": "No supported CLI found ({binaries})"
+      "noSupportedCli": "No supported CLI found ({binaries})",
+      "apiKeyRequired": "Token is required"
     },
     "prompts": {
       "provider": "Choose a provider:",
-      "model": "Choose a model:"
+      "routerProvider": "Choose an orchestrator provider:",
+      "model": "Choose a model:",
+      "routerModel": "Choose an orchestrator model:",
+      "apiKeySource": "{envKey} is set. Which token should be used?",
+      "apiKey": "Enter {provider} API token:"
+    },
+    "options": {
+      "useEnvToken": "Use current {envKey}",
+      "enterNewToken": "Enter a new token"
     }
   },
   "chat": {
@@ -49,7 +63,7 @@
       "aborted": "aborted"
     },
     "errors": {
-      "requestFailed": "Error: {message}"
+      "requestFailed": "✖ Error: {message}"
     }
   },
   "thinking": {
@@ -76,16 +90,19 @@
       "model": "Switch active model",
       "profile": "Switch active profile",
       "prompt": "Inspect or edit prompt layers",
-      "session": "Show current session metrics",
       "usage": "Show total usage metrics",
+      "debug": "Toggle debug mode",
       "statusbar": "Configure status bar",
       "dot": "Choose message marker",
       "resume": "Open session browser",
       "card": "Show mushroom card",
-      "inittheme": "Create project theme.yaml"
+      "inittheme": "Create project theme.yaml",
+      "onboard": "Run onboarding again"
     },
     "args": {
       "off": "No reasoning",
+      "on": "Enable",
+      "offToggle": "Disable",
       "minimal": "Minimal reasoning",
       "low": "Low effort",
       "medium": "Medium effort",
@@ -102,32 +119,15 @@
       "providerSet": "provider: {providerId}",
       "modelSet": "model: {model}",
       "profileSet": "profile: {profile}",
+      "debugSet": "debug: {mode}",
       "dotSet": "dot: {dot}",
       "statusbarSet": "statusbar: {prompt}",
       "promptEdited": "prompt edited: {layer}",
       "promptReset": "prompt reset: {layer}",
       "promptHeader": "# {layer}",
       "sessionResumed": "session loaded: {title}",
-      "themeInitialized": "theme initialized: {path}"
-    },
-    "cards": {
-      "session": {
-        "id": "session",
-        "title": "title",
-        "provider": "provider",
-        "time": "time",
-        "messages": "messages u/a",
-        "tokens": "tokens",
-        "updated": "updated"
-      },
-      "usage": {
-        "sessions": "sessions",
-        "time": "time",
-        "messages": "messages u/a",
-        "tokens": "tokens",
-        "input": "input",
-        "output": "output"
-      }
+      "themeInitialized": "theme initialized: {path}",
+      "onboardCompleted": "onboarding completed: {providerId}/{model}, router: {routerProviderId}"
     },
     "errors": {
       "unknownPromptLayer": "Unknown prompt layer: {layer}",
@@ -138,7 +138,6 @@
       "usageModelUse": "Usage: /model use <slug>",
       "usageProfileUse": "Usage: /profile use <name>",
       "usageStatusbar": "Usage: /statusbar <template>, e.g. /statusbar {folder} | {model} | {thinking} | {messages} msgs | {session_tokens} tok | {session_time}",
-      "noActiveSession": "no active session",
       "unknownPromptSubcommand": "Unknown command /prompt {subcommand}",
       "themeAlreadyExists": "theme file already exists: {path}"
     }

@@ -1,10 +1,15 @@
 import { openaiProvider } from "./openai.js";
 import { anthropicProvider } from "./anthropic.js";
 import { googleProvider } from "./google.js";
+import { deepseekProvider } from "./deepseek.js";
 import { ollamaProvider } from "./ollama.js";
 import { lmstudioProvider } from "./lmstudio.js";
 
-export const PROVIDERS = [openaiProvider, anthropicProvider, googleProvider, ollamaProvider, lmstudioProvider];
+export const PROVIDERS = [openaiProvider, anthropicProvider, googleProvider, deepseekProvider, ollamaProvider, lmstudioProvider];
+
+export function hasProvider(id) {
+  return PROVIDERS.some((provider) => provider.id === id);
+}
 
 export function getProvider(id, i18n) {
   const provider = PROVIDERS.find((p) => p.id === id);

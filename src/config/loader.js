@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import {
   builtInConfig,
@@ -11,10 +12,12 @@ import {
   userConfigSchema,
 } from "./schema.js";
 
+const TOOLS_FILE_OPS_PROMPT_URL = new URL("../prompts/tools-file-ops.md", import.meta.url);
+
 const APP_DIR_NAME = ".mrmush";
 const CONFIG_FILE_NAME = "config.toml";
 const THEME_FILE_NAME = "theme.yaml";
-const DEFAULT_SYSTEM_PROMPT = [
+const LEGACY_DEFAULT_SYSTEM_PROMPT = [
   "You are Mr. Mush.",
   "Be direct, precise, and pragmatic.",
   "Prefer concrete implementation details over generic advice.",
@@ -22,6 +25,28 @@ const DEFAULT_SYSTEM_PROMPT = [
   "When you need to inspect the local project, request a tool call with exactly one fenced block:",
   "```agents-tool",
   "{\"name\":\"bash\",\"args\":{\"cmd\":\"git status --short\"}}",
+  "```",
+  "Do not wrap tool calls in additional JSON or prose. After receiving a tool result, use it to answer the user.",
+].join("\n");
+const DEFAULT_SYSTEM_PROMPT = [
+  "You are Mr. Mush.",
+  "Be direct, precise, and pragmatic.",
+  "Prefer concrete implementation details over generic advice.",
+  "",
+  "You have tool access to the local project when tools are enabled.",
+  "If the bash tool is enabled, you can inspect files and directories in the working tree.",
+  "Do not say that you cannot access the filesystem if file tools are available.",
+  "If the write_file tool is enabled, you can create new files and overwrite existing files after approval.",
+  "Do not tell the user to create files manually when write_file is available.",
+  "",
+  "When you need to inspect the local project, request a tool call with exactly one fenced block:",
+  "```agents-tool",
+  "{\"name\":\"bash\",\"args\":{\"cmd\":\"git status --short\"}}",
+  "```",
+  "",
+  "When you need to create or replace a file, request a tool call with exactly one fenced block:",
+  "```agents-tool",
+  "{\"name\":\"write_file\",\"args\":{\"path\":\"src/example.js\",\"content\":\"export const value = 1;\\n\"}}",
   "```",
   "Do not wrap tool calls in additional JSON or prose. After receiving a tool result, use it to answer the user.",
 ].join("\n");
@@ -36,6 +61,7 @@ const DEFAULT_PROVIDER_PROMPTS = {
   openai: "Provider guidance: prefer Codex CLI compatible instructions.",
   anthropic: "Provider guidance: prefer Claude CLI compatible instructions.",
   google: "Provider guidance: prefer Gemini compatible instructions.",
+  deepseek: "Provider guidance: prefer DeepSeek API compatible instructions.",
 };
 
 function mergeObjects(base, override) {
@@ -133,6 +159,23 @@ async function maybeReadText(filePath) {
   return fs.readFile(filePath, "utf8");
 }
 
+async function readBundledText(fileUrl) {
+  return fs.readFile(fileUrl, "utf8");
+}
+
+async function ensurePromptFile(filePath, expectedContent, legacyContent = null) {
+  const nextContent = `${expectedContent}\n`;
+  if (!(await fileExists(filePath))) {
+    await fs.writeFile(filePath, nextContent, "utf8");
+    return;
+  }
+
+  const currentContent = await fs.readFile(filePath, "utf8");
+  if (legacyContent && currentContent.trim() === legacyContent.trim()) {
+    await fs.writeFile(filePath, nextContent, "utf8");
+  }
+}
+
 async function findProjectFileUpwards(startDir, fileName) {
   let currentDir = startDir;
   while (true) {
@@ -208,9 +251,11 @@ export async function bootstrapConfig({ cwd = process.cwd(), homeDir = os.homedi
   if (!(await fileExists(paths.configFile))) {
     await fs.writeFile(paths.configFile, stringifyToml(config), "utf8");
   }
-  if (!(await fileExists(paths.systemPromptFile))) {
-    await fs.writeFile(paths.systemPromptFile, `${DEFAULT_SYSTEM_PROMPT}\n`, "utf8");
-  }
+  await ensurePromptFile(
+    paths.systemPromptFile,
+    DEFAULT_SYSTEM_PROMPT,
+    LEGACY_DEFAULT_SYSTEM_PROMPT,
+  );
   if (!(await fileExists(paths.profilePromptFile("default")))) {
     await fs.writeFile(paths.profilePromptFile("default"), `${DEFAULT_PROFILE_PROMPT}\n`, "utf8");
   }
@@ -254,6 +299,7 @@ function toUserConfig(config) {
     reasoning: config.reasoning,
     auth: config.auth,
     cache: config.cache,
+    orchestrator: config.orchestrator,
     tools: config.tools,
     providers: config.providers,
     prompts: config.prompts,
@@ -300,6 +346,7 @@ export async function resolvePromptStack(resolvedConfig, cwd = process.cwd()) {
   const { paths } = resolvedConfig;
   const profile = resolvedConfig.activeProfile;
   const providerId = resolvedConfig.activeProvider;
+  const bashEnabled = resolvedConfig.tools?.bash?.enabled ?? builtInConfig.tools.bash.enabled;
   const agentsEngineFile = await findProjectFileUpwards(cwd, "MRMUSH.md");
   const agentsFile = await findProjectFileUpwards(cwd, "AGENTS.md");
   const layers = [
@@ -309,6 +356,11 @@ export async function resolvePromptStack(resolvedConfig, cwd = process.cwd()) {
     { id: "profile", source: paths.profilePromptFile(profile), content: await maybeReadText(paths.profilePromptFile(profile)) },
     { id: "provider", source: paths.providerPromptFile(providerId), content: await maybeReadText(paths.providerPromptFile(providerId)) },
     { id: "project-agents", source: agentsFile, content: agentsFile ? await maybeReadText(agentsFile) : null },
+    {
+      id: "tools-file-ops",
+      source: fileURLToPath(TOOLS_FILE_OPS_PROMPT_URL),
+      content: bashEnabled ? await readBundledText(TOOLS_FILE_OPS_PROMPT_URL) : null,
+    },
     { id: "project-system", source: paths.projectPromptFile, content: await maybeReadText(paths.projectPromptFile) },
   ].filter((layer) => layer.content && layer.content.trim().length > 0);
 
@@ -320,6 +372,15 @@ export async function resolvePromptStack(resolvedConfig, cwd = process.cwd()) {
 
 export async function loadConfig({ cwd = process.cwd(), env = process.env, runtimeOverrides = {}, homeDir = os.homedir() } = {}) {
   const paths = getAppPaths(cwd, homeDir);
+  await ensureDir(paths.rootDir);
+  await ensureDir(paths.promptsDir);
+  await ensureDir(paths.profilesDir);
+  await ensureDir(paths.providerPromptsDir);
+  await ensurePromptFile(
+    paths.systemPromptFile,
+    DEFAULT_SYSTEM_PROMPT,
+    LEGACY_DEFAULT_SYSTEM_PROMPT,
+  );
   const globalConfig = (await readTomlFile(paths.configFile)) ?? {};
   const projectConfig = (await readTomlFile(paths.projectConfigFile)) ?? {};
 
