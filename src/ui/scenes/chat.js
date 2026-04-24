@@ -6,14 +6,28 @@ import { getProvider } from "../../providers/index.js";
 import { createPassiveInputBuffer, promptInput } from "../input.js";
 import { DOT_CHOICES, executeCommand } from "../../commands/index.js";
 import { loadConfig, saveState } from "../../config/loader.js";
-import { buildRepoMapAnswerForPrompt, isRepoIntelligencePrompt } from "../../intelligence/index.js";
+import {
+  buildRepoMapAnswerForPrompt,
+  isRepoIntelligencePrompt,
+} from "../../intelligence/index.js";
 import { createTaskActor, waitForTaskActor } from "../../orchestrator/index.js";
 import { runProviderWithTools } from "../../tools/orchestrator.js";
 import { createSession, recordMessage } from "../../history/session.js";
 import { formatDuration, formatTokenCount } from "../../history/metrics.js";
 import { printMushCard } from "../mush-card.js";
+import {
+  clampTranscriptScrollOffset,
+  getVisibleTranscriptLines,
+  parseMouseWheelKey,
+} from "../transcript-scroll.js";
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
+
+const PROMPT_INPUT_RESERVED_LINES = 5;
+const LIVE_REGION_RESERVED_LINES = 6;
+const TRANSCRIPT_SCROLL_STEP = 3;
+const ENABLE_MOUSE_REPORTING = "\x1b[?1000h\x1b[?1006h";
+const DISABLE_MOUSE_REPORTING = "\x1b[?1000l\x1b[?1006l";
 
 function activeTheme(context) {
   return context.ui?.theme ?? {};
@@ -25,7 +39,7 @@ function color(theme, name, fallback = chalk.white) {
 
 function frameWidth() {
   const columns = process.stdout.columns || 96;
-  return Math.max(6, Math.min(columns - 1, 92));
+  return Math.max(6, columns - 1);
 }
 
 function wrapText(text, width, indent) {
@@ -146,7 +160,7 @@ function extractInputTokens(usage) {
 }
 
 function formatUsage(usage) {
-  return formatTokenCount(extractTotalTokens(usage));
+  return formatTokenCount(extractOutputTokens(usage));
 }
 
 function inputStatus(context, tokens, { animateSessionTokens = false } = {}) {
@@ -236,10 +250,6 @@ function buildMessageLines(text, width) {
   }
 
   return lines.length > 0 ? lines : [""];
-}
-
-function normalizeCompareText(text) {
-  return (text ?? "").replace(/\s+/g, " ").trim();
 }
 
 function stripToolMarkup(text) {
@@ -344,7 +354,10 @@ function buildTerminalEventFrame(text, context) {
   const continuationPrefix = "  ";
   const contentWidth = Math.max(1, (process.stdout.columns || 80) - 4);
   const bodyLines = buildMessageLines(text, contentWidth);
-  const lines = [muted(`${symbol} Terminal`)];
+  const toolMode = context.toolMode;
+  const terminalLabel =
+    toolMode === "native" ? "Terminal  [native]" : "Terminal";
+  const lines = [muted(`${symbol} ${terminalLabel}`)];
   for (let index = 0; index < bodyLines.length; index += 1) {
     lines.push(muted(`${continuationPrefix}${bodyLines[index]}`));
   }
@@ -374,45 +387,6 @@ function buildExpandableTerminalEventFrame(entry, context) {
   return frame;
 }
 
-function highlightCodeLine(line) {
-  return line
-    .replace(
-      /\b(const|let|var|function|return|if|else|for|while|import|from|export|class|async|await|def|print|in|try|except)\b/g,
-      (match) => chalk.hex("#c084fc")(match),
-    )
-    .replace(/(["'`])([^"'`]*)(\1)/g, (match) => chalk.green(match))
-    .replace(/\b(\d+)\b/g, (match) => chalk.yellow(match));
-}
-
-function printMessageBody(text, { prefix, width }) {
-  let inCode = false;
-  let count = 0;
-
-  for (const rawLine of text.split("\n")) {
-    const fence = rawLine.match(/^```(\w+)?\s*$/);
-    if (fence) {
-      inCode = !inCode;
-      continue;
-    }
-
-    if (inCode) {
-      process.stdout.write(
-        `${prefix}${chalk.dim("│ ")}${highlightCodeLine(rawLine)}\n`,
-      );
-      count += 1;
-      continue;
-    }
-
-    const lines = wrapText(rawLine, width, "");
-    for (const line of lines) {
-      process.stdout.write(`${prefix}${line}\n`);
-      count += 1;
-    }
-  }
-
-  return count;
-}
-
 function buildMessagesFromTranscript(promptStack, transcript, currentPrompt) {
   const messages = [];
   if (promptStack?.text) {
@@ -437,7 +411,10 @@ function isInsideCwd(filePath, cwd) {
   const resolvedCwd = path.resolve(cwd);
   const resolvedPath = path.resolve(resolvedCwd, filePath);
   const relativePath = path.relative(resolvedCwd, resolvedPath);
-  return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
+  return (
+    relativePath === "" ||
+    (!relativePath.startsWith("..") && !path.isAbsolute(relativePath))
+  );
 }
 
 function isDeniedFileMention(filePath, cwd, config = {}) {
@@ -454,10 +431,12 @@ function isDeniedFileMention(filePath, cwd, config = {}) {
 
   return deniedPatterns.some((pattern) => {
     if (!pattern) return false;
-    return relativePath === pattern
-      || relativePath.startsWith(`${pattern}/`)
-      || resolvedPath.includes(`${path.sep}${pattern}${path.sep}`)
-      || resolvedPath.endsWith(`${path.sep}${pattern}`);
+    return (
+      relativePath === pattern ||
+      relativePath.startsWith(`${pattern}/`) ||
+      resolvedPath.includes(`${path.sep}${pattern}${path.sep}`) ||
+      resolvedPath.endsWith(`${path.sep}${pattern}`)
+    );
   });
 }
 
@@ -465,12 +444,14 @@ async function buildPromptWithFileMentions(text, context) {
   const mentions = extractFileMentions(text);
   if (mentions.length === 0) return text;
 
-  const maxBytes = Math.max(1, context.config.tools?.files?.max_file_size_kb ?? 512) * 1024;
+  const maxBytes =
+    Math.max(1, context.config.tools?.files?.max_file_size_kb ?? 512) * 1024;
   const fileBlocks = [];
 
   for (const mention of mentions) {
     if (!isInsideCwd(mention, context.cwd)) continue;
-    if (isDeniedFileMention(mention, context.cwd, context.config.tools?.files)) continue;
+    if (isDeniedFileMention(mention, context.cwd, context.config.tools?.files))
+      continue;
     const resolvedPath = path.resolve(context.cwd, mention);
     let content;
     try {
@@ -482,15 +463,15 @@ async function buildPromptWithFileMentions(text, context) {
     }
 
     const truncated = Buffer.byteLength(content, "utf8") > maxBytes;
-    const visibleContent = truncated
-      ? content.slice(0, maxBytes)
-      : content;
-    fileBlocks.push([
-      `File: ${mention}${truncated ? " (truncated)" : ""}`,
-      "```",
-      visibleContent,
-      "```",
-    ].join("\n"));
+    const visibleContent = truncated ? content.slice(0, maxBytes) : content;
+    fileBlocks.push(
+      [
+        `File: ${mention}${truncated ? " (truncated)" : ""}`,
+        "```",
+        visibleContent,
+        "```",
+      ].join("\n"),
+    );
   }
 
   if (fileBlocks.length === 0) return text;
@@ -596,7 +577,13 @@ function createTerminalEventMeta(toolCall, toolResult) {
       `❯ write_file ${toolCall.args.path}`,
     ];
     if (toolResult?.error?.trim()) {
-      lines.push("", ...toolResult.error.trim().split("\n").map((line) => `  ${line}`));
+      lines.push(
+        "",
+        ...toolResult.error
+          .trim()
+          .split("\n")
+          .map((line) => `  ${line}`),
+      );
     } else {
       lines.push("", `  written: ${toolResult?.written ?? 0} bytes`);
     }
@@ -619,7 +606,10 @@ function createDebugEventMeta(title = "debug") {
   };
 }
 
-function formatOrchestratorDebugLine(snapshot, { providerId, routerProviderId }) {
+function formatOrchestratorDebugLine(
+  snapshot,
+  { providerId, routerProviderId },
+) {
   const state = String(snapshot.value);
 
   if (state === "routing") {
@@ -639,7 +629,9 @@ function formatOrchestratorDebugLine(snapshot, { providerId, routerProviderId })
   }
 
   if (state === "error") {
-    const message = snapshot.context.error?.message ?? String(snapshot.context.error ?? "unknown error");
+    const message =
+      snapshot.context.error?.message ??
+      String(snapshot.context.error ?? "unknown error");
     return `orchestrator: error ${message}`;
   }
 
@@ -661,10 +653,7 @@ function formatDebugBlock(message) {
 function formatNumberedDebugBlock(step, message) {
   const lines = formatDebugBlock(message).split("\n");
   if (lines.length === 0) return `${step}.`;
-  return [
-    `${step}. ${lines[0]}`,
-    ...lines.slice(1),
-  ].join("\n");
+  return [`${step}. ${lines[0]}`, ...lines.slice(1)].join("\n");
 }
 
 function summarizeRepoMapLayer(config, promptStack) {
@@ -673,7 +662,9 @@ function summarizeRepoMapLayer(config, promptStack) {
     return "intelligence: repo-map disabled";
   }
 
-  const repoLayer = promptStack?.layers?.find((layer) => layer.id === "repo-map");
+  const repoLayer = promptStack?.layers?.find(
+    (layer) => layer.id === "repo-map",
+  );
   if (!repoLayer) {
     return "intelligence: repo-map layer missing";
   }
@@ -683,29 +674,33 @@ function summarizeRepoMapLayer(config, promptStack) {
     return "intelligence: repo-map enabled but empty";
   }
 
-  const mode = repoLayer.meta?.mode ?? config?.intelligence?.repo_map?.mode ?? "dense";
+  const mode =
+    repoLayer.meta?.mode ?? config?.intelligence?.repo_map?.mode ?? "dense";
   const files = repoLayer.meta?.files ?? 0;
   const symbols = repoLayer.meta?.symbols ?? 0;
   const exportedSymbols = repoLayer.meta?.exportedSymbols ?? 0;
   const internalSymbols = repoLayer.meta?.internalSymbols ?? 0;
   const lines = content.split("\n");
-  const fileLines = lines.filter((line) => (
-    line
-    && !line.startsWith("  ")
-    && line !== "Repository map:"
-    && line !== "Repository map context:"
-    && !line.startsWith("This is a generated")
-    && !line.startsWith("Use this map before")
-    && !line.startsWith("If the user asks")
-    && !line.startsWith("Only call filesystem")
-  ));
+  const fileLines = lines.filter(
+    (line) =>
+      line &&
+      !line.startsWith("  ") &&
+      line !== "Repository map:" &&
+      line !== "Repository map context:" &&
+      !line.startsWith("This is a generated") &&
+      !line.startsWith("Use this map before") &&
+      !line.startsWith("If the user asks") &&
+      !line.startsWith("Only call filesystem"),
+  );
   const previewFiles = fileLines.slice(0, 3).join(", ");
   const approxTokens = Math.ceil(content.length / 4);
 
   return [
     `intelligence: repo-map attached mode=${mode} tokens~=${approxTokens} files=${files || fileLines.length} symbols=${symbols} exported=${exportedSymbols} internal=${internalSymbols}`,
     previewFiles ? `intelligence: top files ${previewFiles}` : null,
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function getRepoMapLayer(promptStack) {
@@ -722,6 +717,9 @@ export async function runChatScreen(context) {
   let passiveInput = null;
   let resizeHandler = null;
   let debugStepCounter = 0;
+  let resetLiveRegionState = () => {};
+  let transcriptScrollOffset = 0;
+  let mouseReportingExitHandler = null;
 
   context.chatSessionOrchestrator = {
     errors: context.chatSessionOrchestrator?.errors ?? 0,
@@ -773,10 +771,10 @@ export async function runChatScreen(context) {
     if (!text?.trim()) return;
     const lastEntry = transcript.at(-1);
     if (
-      meta?.kind === "tool_event"
-      && meta?.title === "debug"
-      && lastEntry?.meta?.kind === "tool_event"
-      && lastEntry?.meta?.title === "debug"
+      meta?.kind === "tool_event" &&
+      meta?.title === "debug" &&
+      lastEntry?.meta?.kind === "tool_event" &&
+      lastEntry?.meta?.title === "debug"
     ) {
       lastEntry.text = `${lastEntry.text}\n\n${text}`;
       redrawScreen();
@@ -841,35 +839,118 @@ export async function runChatScreen(context) {
       process.stdout.removeListener("resize", resizeHandler);
       resizeHandler = null;
     }
+    if (mouseReportingExitHandler) {
+      process.removeListener("exit", mouseReportingExitHandler);
+      mouseReportingExitHandler = null;
+    }
+    process.stdout.write(DISABLE_MOUSE_REPORTING);
   }
 
   function setupViewport() {
-    process.stdout.write("\x1b[H\x1b[J");
+    mouseReportingExitHandler = () => {
+      process.stdout.write(DISABLE_MOUSE_REPORTING);
+    };
+    process.once("exit", mouseReportingExitHandler);
+    process.stdout.write(`${ENABLE_MOUSE_REPORTING}\x1b[H\x1b[3J\x1b[J`);
   }
 
-  function renderTranscriptEntry(entry) {
+  function buildTranscriptEntryFrame(entry) {
     if (entry.role === "user") {
-      printUserMessage(entry.text, context);
-    } else if (entry.meta?.kind === "terminal_event") {
-      printExpandableTerminalEventMessage(entry, context);
-    } else if (entry.meta?.kind === "tool_event") {
-      printToolEventMessage(entry.meta.title ?? "tool", entry.text, context);
-    } else {
-      printAiMessage(entry.text, context);
+      return buildUserMessageFrame(entry.text, context);
     }
+    if (entry.meta?.kind === "terminal_event") {
+      return buildExpandableTerminalEventFrame(entry, context);
+    }
+    if (entry.meta?.kind === "tool_event") {
+      return buildToolEventFrame(entry.meta.title ?? "tool", entry.text, context);
+    }
+    return buildAiMessageFrame(entry.text, context);
+  }
+
+  function buildTranscriptLines() {
+    return transcript.flatMap((entry) =>
+      buildTranscriptEntryFrame(entry).text.split("\n"),
+    );
+  }
+
+  function transcriptViewportHeight(reservedBottomLines = 0) {
+    const rows = process.stdout.rows || 24;
+    return Math.max(1, rows - reservedBottomLines - 2);
+  }
+
+  function renderTranscriptViewport(reservedBottomLines = 0) {
+    const lines = buildTranscriptLines();
+    const viewportHeight = transcriptViewportHeight(reservedBottomLines);
+    transcriptScrollOffset = clampTranscriptScrollOffset(
+      transcriptScrollOffset,
+      lines.length,
+      viewportHeight,
+    );
+    const visibleLines = getVisibleTranscriptLines(
+      lines,
+      viewportHeight,
+      transcriptScrollOffset,
+    );
+
+    if (transcriptScrollOffset > 0) {
+      const theme = activeTheme(context);
+      const muted = color(theme, "muted", chalk.dim);
+      process.stdout.write(muted(`↑ ${transcriptScrollOffset} lines above latest`) + "\n");
+    }
+    if (visibleLines.length > 0) {
+      process.stdout.write(visibleLines.join("\n"));
+      process.stdout.write("\n");
+    }
+  }
+
+  function scrollTranscriptBy(delta, reservedBottomLines = 0, renderInput = null) {
+    const lines = buildTranscriptLines();
+    const viewportHeight = transcriptViewportHeight(reservedBottomLines);
+    const nextOffset = clampTranscriptScrollOffset(
+      transcriptScrollOffset + delta,
+      lines.length,
+      viewportHeight,
+    );
+    transcriptScrollOffset = nextOffset;
+    redrawScreen({ renderInput, reservedBottomLines });
+    return true;
+  }
+
+  function handleTranscriptScrollKey(
+    key,
+    reservedBottomLines = 0,
+    renderInput = null,
+  ) {
+    const wheel = parseMouseWheelKey(key);
+    if (wheel === "up") {
+      return scrollTranscriptBy(
+        TRANSCRIPT_SCROLL_STEP,
+        reservedBottomLines,
+        renderInput,
+      );
+    }
+    if (wheel === "down") {
+      return scrollTranscriptBy(
+        -TRANSCRIPT_SCROLL_STEP,
+        reservedBottomLines,
+        renderInput,
+      );
+    }
+    return false;
   }
 
   function redrawScreen({
     pendingLine = "",
     streamingText = "",
     renderInput = null,
+    reservedBottomLines = renderInput ? PROMPT_INPUT_RESERVED_LINES : 0,
   } = {}) {
     process.stdout.write("\x1b[?25l\x1b[H\x1b[J");
-    process.stdout.write("\n");
-    splash(context);
-
-    for (const entry of transcript) {
-      renderTranscriptEntry(entry);
+    if (transcript.length === 0) {
+      process.stdout.write("\n");
+      splash(context);
+    } else {
+      renderTranscriptViewport(reservedBottomLines);
     }
 
     if (pendingLine) {
@@ -886,6 +967,7 @@ export async function runChatScreen(context) {
     }
 
     process.stdout.write("\x1b[?25h");
+    resetLiveRegionState();
   }
 
   setupViewport();
@@ -912,11 +994,19 @@ export async function runChatScreen(context) {
               .filter((e) => e.role === "user")
               .map((e) => e.text)
               .reverse(),
-            { cwd: context.cwd },
+            {
+              cwd: context.cwd,
+              onRawKey: (key, renderInput) =>
+                handleTranscriptScrollKey(
+                  key,
+                  PROMPT_INPUT_RESERVED_LINES,
+                  renderInput,
+                ),
+            },
           )
         ).trim();
         context.currentSessionDisplayedTokens =
-          context.currentSessionMetrics?.totalTokens ?? 0;
+          context.currentSessionMetrics?.outputTokens ?? 0;
         queuedInput = "";
       } catch {
         break;
@@ -928,6 +1018,7 @@ export async function runChatScreen(context) {
 
       // Команды
       if (text.startsWith("/")) {
+        transcriptScrollOffset = 0;
         transcript.push({ role: "user", text });
         context.currentSessionMetrics = {
           ...(context.currentSessionMetrics ?? {
@@ -1013,9 +1104,9 @@ export async function runChatScreen(context) {
       });
 
       if (
-        context.chatSessionOrchestrator.openedAt
-        && Date.now() - context.chatSessionOrchestrator.openedAt
-          >= context.chatSessionOrchestrator.resetDelayMs
+        context.chatSessionOrchestrator.openedAt &&
+        Date.now() - context.chatSessionOrchestrator.openedAt >=
+          context.chatSessionOrchestrator.resetDelayMs
       ) {
         context.chatSessionOrchestrator = {
           ...context.chatSessionOrchestrator,
@@ -1024,6 +1115,7 @@ export async function runChatScreen(context) {
         };
       }
 
+      transcriptScrollOffset = 0;
       transcript.push({ role: "user", text });
       debugStepCounter = 0;
       context.currentSessionMetrics = {
@@ -1046,10 +1138,8 @@ export async function runChatScreen(context) {
       }
       redrawScreen();
       const abort = new AbortController();
-      const stopThinking = () => {};
       const shouldStream = provider.source !== "cli";
       let streamedText = "";
-      let hasStoppedThinking = false;
       let inputVisible = false;
       let pendingFrameIndex = 0;
       let pendingAnimation = null;
@@ -1059,12 +1149,6 @@ export async function runChatScreen(context) {
       let activeBlockMode = "none";
       let expandableTerminalEntry = null;
       let expandKeyHandler = null;
-
-      function stopThinkingOnce() {
-        if (hasStoppedThinking) return;
-        stopThinking();
-        hasStoppedThinking = true;
-      }
 
       function clearVisibleInput() {
         if (!inputVisible) return;
@@ -1088,6 +1172,12 @@ export async function runChatScreen(context) {
         activeBlockMode = "none";
       }
 
+      resetLiveRegionState = () => {
+        liveRegionCursorUpLines = 0;
+        liveRegionBlockHeight = 0;
+        activeBlockMode = "none";
+      };
+
       function disableTerminalExpansion() {
         if (!expandKeyHandler) return false;
         process.stdin.removeListener("data", expandKeyHandler);
@@ -1104,8 +1194,17 @@ export async function runChatScreen(context) {
       }
 
       function enableTerminalExpansion(entry) {
-        disableTerminalExpansion();
-        if (!entry?.meta?.canExpand) return;
+        if (!entry?.meta?.canExpand) {
+          disableTerminalExpansion();
+          return;
+        }
+        if (expandKeyHandler) {
+          if (expandableTerminalEntry?.meta) {
+            expandableTerminalEntry.meta.canExpand = false;
+          }
+          expandableTerminalEntry = entry;
+          return;
+        }
         expandableTerminalEntry = entry;
         expandKeyHandler = (key) => {
           if (key === "\x03") {
@@ -1115,7 +1214,8 @@ export async function runChatScreen(context) {
           }
           if (key !== "\x0f") return;
           if (!expandableTerminalEntry?.meta?.canExpand) return;
-          expandableTerminalEntry.meta.expanded = !expandableTerminalEntry.meta.expanded;
+          expandableTerminalEntry.meta.expanded =
+            !expandableTerminalEntry.meta.expanded;
           clearLiveRegion();
           redrawScreen();
         };
@@ -1152,9 +1252,9 @@ export async function runChatScreen(context) {
       function renderPendingState() {
         renderLiveRegion(
           {
-            text: `${formatPendingLine(context, pendingFrameIndex)}\n`,
-            blockHeight: 1,
-            cursorUpLines: 1,
+            text: `${formatPendingLine(context, pendingFrameIndex)}\n\n`,
+            blockHeight: 2,
+            cursorUpLines: 2,
           },
           "pending",
         );
@@ -1199,10 +1299,12 @@ export async function runChatScreen(context) {
 
       resizeHandler = () => {
         if (shouldStream && activeBlockMode === "stream" && streamedText) {
+          redrawScreen({ reservedBottomLines: LIVE_REGION_RESERVED_LINES });
           renderStreamingState();
           return;
         }
         if (activeBlockMode === "pending") {
+          redrawScreen({ reservedBottomLines: LIVE_REGION_RESERVED_LINES });
           renderPendingState();
           return;
         }
@@ -1224,6 +1326,19 @@ export async function runChatScreen(context) {
             if (activeBlockMode === "pending") {
               renderPendingState();
             }
+          },
+          onRawKey: (key) => {
+            const handled = handleTranscriptScrollKey(
+              key,
+              LIVE_REGION_RESERVED_LINES,
+            );
+            if (!handled) return false;
+            if (activeBlockMode === "stream" && streamedText) {
+              renderStreamingState();
+            } else if (activeBlockMode === "pending") {
+              renderPendingState();
+            }
+            return true;
           },
         });
         inputVisible = true;
@@ -1259,7 +1374,9 @@ export async function runChatScreen(context) {
             if (context.runtimeOverrides.debug) {
               stopPendingAnimation();
               clearLiveRegion();
-              appendDebugMessage("intelligence: answering directly from repo-map");
+              appendDebugMessage(
+                "intelligence: answering directly from repo-map",
+              );
               appendDebugMessage(
                 `response: chars=${response.text.length} usage=no stream=off source=repo-map`,
               );
@@ -1277,7 +1394,6 @@ export async function runChatScreen(context) {
           onToken: shouldStream
             ? (token) => {
                 stopPendingAnimation();
-                stopThinkingOnce();
                 streamedText += token;
                 scheduleStreamRender();
               }
@@ -1301,7 +1417,6 @@ export async function runChatScreen(context) {
           },
           onAssistantToolIntent: async ({ assistantText }) => {
             stopPendingAnimation();
-            stopThinkingOnce();
             if (streamRedrawTimer) {
               clearTimeout(streamRedrawTimer);
               streamRedrawTimer = null;
@@ -1332,9 +1447,9 @@ export async function runChatScreen(context) {
         };
         if (!response && context.config.orchestrator?.enabled) {
           const routerProviderId =
-            context.config.orchestrator?.router_provider
-            ?? context.runtimeOverrides.providerId
-            ?? context.config.activeProvider;
+            context.config.orchestrator?.router_provider ??
+            context.runtimeOverrides.providerId ??
+            context.config.activeProvider;
           const routerProvider = getProvider(routerProviderId, i18n);
           const debugEnabled = Boolean(context.runtimeOverrides.debug);
           const actor = createTaskActor({
@@ -1391,10 +1506,11 @@ export async function runChatScreen(context) {
             context.chatSessionOrchestrator = {
               ...context.chatSessionOrchestrator,
               errors: context.chatSessionOrchestrator.maxErrors,
-              openedAt:
-                context.chatSessionOrchestrator.openedAt ?? Date.now(),
+              openedAt: context.chatSessionOrchestrator.openedAt ?? Date.now(),
             };
-            throw new Error("Task orchestrator circuit is open. Please wait 30 seconds and retry.");
+            throw new Error(
+              "Task orchestrator circuit is open. Please wait 30 seconds and retry.",
+            );
           }
 
           context.chatSessionOrchestrator = {
@@ -1421,9 +1537,9 @@ export async function runChatScreen(context) {
           );
         }
         if (
-          shouldStream
-          && (!response?.text || response.text.trim().length === 0)
-          && provider.source === "api"
+          shouldStream &&
+          (!response?.text || response.text.trim().length === 0) &&
+          provider.source === "api"
         ) {
           if (context.runtimeOverrides.debug) {
             stopPendingAnimation();
@@ -1468,7 +1584,6 @@ export async function runChatScreen(context) {
           process.stdout.removeListener("resize", resizeHandler);
           resizeHandler = null;
         }
-        stopThinkingOnce();
         if (passiveInput) {
           queuedInput = passiveInput.stop();
           passiveInput = null;
@@ -1488,8 +1603,8 @@ export async function runChatScreen(context) {
                 context.chatSessionOrchestrator.errors + 1,
               ),
               openedAt:
-                context.chatSessionOrchestrator.errors + 1
-                  >= context.chatSessionOrchestrator.maxErrors
+                context.chatSessionOrchestrator.errors + 1 >=
+                context.chatSessionOrchestrator.maxErrors
                   ? (context.chatSessionOrchestrator.openedAt ?? Date.now())
                   : context.chatSessionOrchestrator.openedAt,
             };
@@ -1514,7 +1629,6 @@ export async function runChatScreen(context) {
         redrawScreen();
       }
       flushStreamRender();
-      stopThinkingOnce();
       if (shouldStream) {
         if (passiveInput) {
           queuedInput = passiveInput.stop();
@@ -1534,5 +1648,6 @@ export async function runChatScreen(context) {
     }
   } finally {
     teardownViewport();
+    resetLiveRegionState = () => {};
   }
 }

@@ -17,7 +17,7 @@ const FILE_WALK_SKIP = new Set([
 
 function frameWidth() {
   const columns = process.stdout.columns || 96;
-  return Math.max(6, Math.min(columns - 1, 92));
+  return Math.max(6, columns - 1);
 }
 
 function createRenderState() {
@@ -230,7 +230,9 @@ async function loadFileSuggestions(cwd) {
 
 function renderStatusbar(status, width) {
   if (!status) return null;
-  const template = status.template ?? "{folder} | {model} | {thinking} | {tokens}";
+  const template =
+    status.template ??
+    "{folder} | {model} | {thinking} | {messages} msgs | {session_tokens} out";
   return template
     .replaceAll("{folder}", status.folder ?? "–")
     .replaceAll("{model}", status.model ?? "–")
@@ -410,6 +412,7 @@ export function promptInput(
   options = {},
 ) {
   const renderState = createRenderState();
+  const { onRawKey = null } = options;
 
   return new Promise((resolve) => {
     process.stdin.setRawMode(true);
@@ -517,6 +520,10 @@ export function promptInput(
         process.stdout.write("\r\x1b[J\n");
         cleanup();
         process.exit(0);
+      }
+
+      if (onRawKey?.(key, resetAndRerender)) {
+        return;
       }
 
       if (isSubmitKey(key)) {
@@ -686,7 +693,18 @@ export function promptInput(
   });
 }
 
-export function createPassiveInputBuffer(i18n, theme, { onEscape = null, status = null, autoResize = true, externalRender = false, onChange = null } = {}) {
+export function createPassiveInputBuffer(
+  i18n,
+  theme,
+  {
+    onEscape = null,
+    status = null,
+    autoResize = true,
+    externalRender = false,
+    onChange = null,
+    onRawKey = null,
+  } = {},
+) {
   let buffer = "";
   const renderState = createRenderState();
   let cursorIndex = 0;
@@ -703,6 +721,10 @@ export function createPassiveInputBuffer(i18n, theme, { onEscape = null, status 
     if (key === "\x03") {
       process.stdout.write("\r\x1b[J\n");
       process.exit(0);
+    }
+
+    if (onRawKey?.(key, render)) {
+      return;
     }
 
     if (key === "\x1b" && onEscape) {

@@ -4,7 +4,7 @@ export const PROVIDER_IDS = ["openai", "anthropic", "google", "deepseek", "ollam
 export const PROFILE_IDS = ["default"];
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh"];
 export const LEGACY_STATUSBAR_TEMPLATE = "{folder} | {model} | {thinking} | {tokens}";
-export const DEFAULT_STATUSBAR_TEMPLATE = "{folder} | {model} | {thinking} | {messages} msgs | {session_tokens} tok | {session_time}";
+export const DEFAULT_STATUSBAR_TEMPLATE = "{folder} | {model} | {thinking} | {messages} msgs | {session_tokens} out | {session_time}";
 export const DEFAULT_USAGE_TEMPLATE = [
   "model: {model}",
   "project: {project}",
@@ -100,6 +100,7 @@ const intelligenceSchema = z.object({
 }).strict();
 
 const toolsSchema = z.object({
+  force_markdown: z.boolean().default(false),
   bash: z.object({
     enabled: z.boolean().default(true),
     timeout_ms: z.number().int().positive().default(30_000),

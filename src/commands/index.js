@@ -391,18 +391,31 @@ export async function executeCommand(text, context) {
         },
       };
 
-      if (selection.authPatch) {
-        await saveConfig(
-          {
-            ...config,
-            auth: {
-              ...config.auth,
-              ...selection.authPatch,
+      const nextConfig = await saveConfig(
+        {
+          ...config,
+          active_provider: selection.providerId,
+          active_model: selection.model,
+          auth: {
+            ...config.auth,
+            ...(selection.authPatch ?? {}),
+          },
+          providers: {
+            ...config.providers,
+            [selection.providerId]: {
+              ...config.providers[selection.providerId],
+              model: selection.model,
             },
           },
-          config.paths,
-        );
-      }
+        },
+        config.paths,
+      );
+      context.config = {
+        ...config,
+        ...nextConfig,
+        activeProvider: selection.providerId,
+        activeModel: selection.model,
+      };
 
       return successResult(
         i18n.t("commands.messages.modelSet", {
