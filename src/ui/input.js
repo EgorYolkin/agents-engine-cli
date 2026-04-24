@@ -157,6 +157,14 @@ function isArrowDown(key) {
   return key === "\x1b[B";
 }
 
+function isHistoryPreviousKey(key) {
+  return key === "\x10";
+}
+
+function isHistoryNextKey(key) {
+  return key === "\x0e";
+}
+
 function isArrowLeft(key) {
   return key === "\x1b[D";
 }
@@ -412,7 +420,6 @@ export function promptInput(
   options = {},
 ) {
   const renderState = createRenderState();
-  const { onRawKey = null } = options;
 
   return new Promise((resolve) => {
     process.stdin.setRawMode(true);
@@ -457,6 +464,25 @@ export function promptInput(
     function leaveHistoryNavigation() {
       if (historyIdx === -1) return;
       historyIdx = -1;
+    }
+
+    function showPreviousHistoryItem() {
+      if (promptHistory.length === 0) return;
+      if (historyIdx === -1) savedBuffer = buffer;
+      historyIdx = Math.min(historyIdx + 1, promptHistory.length - 1);
+      buffer = promptHistory[historyIdx];
+      cursorIndex = buffer.length;
+      suggestions = [];
+      rerender();
+    }
+
+    function showNextHistoryItem() {
+      if (historyIdx < 0) return;
+      historyIdx -= 1;
+      buffer = historyIdx === -1 ? savedBuffer : promptHistory[historyIdx];
+      cursorIndex = buffer.length;
+      suggestions = [];
+      rerender();
     }
 
     function resetAndRerender() {
@@ -522,10 +548,6 @@ export function promptInput(
         process.exit(0);
       }
 
-      if (onRawKey?.(key, resetAndRerender)) {
-        return;
-      }
-
       if (isSubmitKey(key)) {
         clearRenderedInputBox(renderState);
         cleanup();
@@ -588,6 +610,16 @@ export function promptInput(
         return;
       }
 
+      if (isHistoryPreviousKey(key)) {
+        showPreviousHistoryItem();
+        return;
+      }
+
+      if (isHistoryNextKey(key)) {
+        showNextHistoryItem();
+        return;
+      }
+
       if (isArrowUp(key)) {
         if (suggestions.length > 0 && !buffer.includes("\n")) {
           selectedIdx = Math.max(0, selectedIdx - 1);
@@ -600,12 +632,7 @@ export function promptInput(
           cursorIndex = moved.cursorIndex;
           rerender();
         } else if (promptHistory.length > 0) {
-          if (historyIdx === -1) savedBuffer = buffer;
-          historyIdx = Math.min(historyIdx + 1, promptHistory.length - 1);
-          buffer = promptHistory[historyIdx];
-          cursorIndex = buffer.length;
-          suggestions = [];
-          rerender();
+          showPreviousHistoryItem();
         }
         return;
       }
@@ -622,11 +649,7 @@ export function promptInput(
           cursorIndex = moved.cursorIndex;
           rerender();
         } else if (historyIdx >= 0) {
-          historyIdx -= 1;
-          buffer = historyIdx === -1 ? savedBuffer : promptHistory[historyIdx];
-          cursorIndex = buffer.length;
-          suggestions = [];
-          rerender();
+          showNextHistoryItem();
         }
         return;
       }
@@ -702,7 +725,6 @@ export function createPassiveInputBuffer(
     autoResize = true,
     externalRender = false,
     onChange = null,
-    onRawKey = null,
   } = {},
 ) {
   let buffer = "";
@@ -721,10 +743,6 @@ export function createPassiveInputBuffer(
     if (key === "\x03") {
       process.stdout.write("\r\x1b[J\n");
       process.exit(0);
-    }
-
-    if (onRawKey?.(key, render)) {
-      return;
     }
 
     if (key === "\x1b" && onEscape) {

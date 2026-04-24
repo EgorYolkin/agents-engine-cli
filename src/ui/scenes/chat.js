@@ -15,19 +15,11 @@ import { runProviderWithTools } from "../../tools/orchestrator.js";
 import { createSession, recordMessage } from "../../history/session.js";
 import { formatDuration, formatTokenCount } from "../../history/metrics.js";
 import { printMushCard } from "../mush-card.js";
-import {
-  clampTranscriptScrollOffset,
-  getVisibleTranscriptLines,
-  parseMouseWheelKey,
-} from "../transcript-scroll.js";
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
-const PROMPT_INPUT_RESERVED_LINES = 5;
-const LIVE_REGION_RESERVED_LINES = 6;
-const TRANSCRIPT_SCROLL_STEP = 3;
-const ENABLE_MOUSE_REPORTING = "\x1b[?1000h\x1b[?1006h";
-const DISABLE_MOUSE_REPORTING = "\x1b[?1000l\x1b[?1006l";
+const INLINE_TERMINAL_MODE =
+  "\x1b[?1049l\x1b[?1047l\x1b[?47l\x1b[?1000l\x1b[?1006l\x1b[?1l";
 
 function activeTheme(context) {
   return context.ui?.theme ?? {};
@@ -718,8 +710,7 @@ export async function runChatScreen(context) {
   let resizeHandler = null;
   let debugStepCounter = 0;
   let resetLiveRegionState = () => {};
-  let transcriptScrollOffset = 0;
-  let mouseReportingExitHandler = null;
+  let renderedTranscriptEntries = 0;
 
   context.chatSessionOrchestrator = {
     errors: context.chatSessionOrchestrator?.errors ?? 0,
@@ -758,13 +749,16 @@ export async function runChatScreen(context) {
     }
     if (meta?.kind === "tool_event") {
       printToolEventMessage(meta.title ?? "tool", text, context);
+      renderedTranscriptEntries = transcript.length;
       return;
     }
     if (meta?.kind === "terminal_event") {
       printExpandableTerminalEventMessage({ text, meta }, context);
+      renderedTranscriptEntries = transcript.length;
       return;
     }
     printAiMessage(text, context);
+    renderedTranscriptEntries = transcript.length;
   }
 
   function appendEventMessage(text, meta) {
@@ -777,19 +771,22 @@ export async function runChatScreen(context) {
       lastEntry?.meta?.title === "debug"
     ) {
       lastEntry.text = `${lastEntry.text}\n\n${text}`;
-      redrawScreen();
+      redrawScreen({ fullRefresh: true });
       return;
     }
     transcript.push({ role: "assistant", text, meta });
     if (meta?.kind === "terminal_event") {
       printExpandableTerminalEventMessage({ text, meta }, context);
+      renderedTranscriptEntries = transcript.length;
       return;
     }
     if (meta?.kind === "tool_event") {
       printToolEventMessage(meta.title ?? "event", text, context);
+      renderedTranscriptEntries = transcript.length;
       return;
     }
     printAiMessage(text, context);
+    renderedTranscriptEntries = transcript.length;
   }
 
   function appendDebugMessage(text) {
@@ -839,119 +836,47 @@ export async function runChatScreen(context) {
       process.stdout.removeListener("resize", resizeHandler);
       resizeHandler = null;
     }
-    if (mouseReportingExitHandler) {
-      process.removeListener("exit", mouseReportingExitHandler);
-      mouseReportingExitHandler = null;
-    }
-    process.stdout.write(DISABLE_MOUSE_REPORTING);
   }
 
   function setupViewport() {
-    mouseReportingExitHandler = () => {
-      process.stdout.write(DISABLE_MOUSE_REPORTING);
-    };
-    process.once("exit", mouseReportingExitHandler);
-    process.stdout.write(`${ENABLE_MOUSE_REPORTING}\x1b[H\x1b[3J\x1b[J`);
+    process.stdout.write(INLINE_TERMINAL_MODE);
+    process.stdout.write("\n");
+    splash(context);
   }
 
-  function buildTranscriptEntryFrame(entry) {
+  function renderTranscriptEntry(entry) {
     if (entry.role === "user") {
-      return buildUserMessageFrame(entry.text, context);
+      printUserMessage(entry.text, context);
+    } else if (entry.meta?.kind === "terminal_event") {
+      printExpandableTerminalEventMessage(entry, context);
+    } else if (entry.meta?.kind === "tool_event") {
+      printToolEventMessage(entry.meta.title ?? "tool", entry.text, context);
+    } else {
+      printAiMessage(entry.text, context);
     }
-    if (entry.meta?.kind === "terminal_event") {
-      return buildExpandableTerminalEventFrame(entry, context);
-    }
-    if (entry.meta?.kind === "tool_event") {
-      return buildToolEventFrame(entry.meta.title ?? "tool", entry.text, context);
-    }
-    return buildAiMessageFrame(entry.text, context);
-  }
-
-  function buildTranscriptLines() {
-    return transcript.flatMap((entry) =>
-      buildTranscriptEntryFrame(entry).text.split("\n"),
-    );
-  }
-
-  function transcriptViewportHeight(reservedBottomLines = 0) {
-    const rows = process.stdout.rows || 24;
-    return Math.max(1, rows - reservedBottomLines - 2);
-  }
-
-  function renderTranscriptViewport(reservedBottomLines = 0) {
-    const lines = buildTranscriptLines();
-    const viewportHeight = transcriptViewportHeight(reservedBottomLines);
-    transcriptScrollOffset = clampTranscriptScrollOffset(
-      transcriptScrollOffset,
-      lines.length,
-      viewportHeight,
-    );
-    const visibleLines = getVisibleTranscriptLines(
-      lines,
-      viewportHeight,
-      transcriptScrollOffset,
-    );
-
-    if (transcriptScrollOffset > 0) {
-      const theme = activeTheme(context);
-      const muted = color(theme, "muted", chalk.dim);
-      process.stdout.write(muted(`↑ ${transcriptScrollOffset} lines above latest`) + "\n");
-    }
-    if (visibleLines.length > 0) {
-      process.stdout.write(visibleLines.join("\n"));
-      process.stdout.write("\n");
-    }
-  }
-
-  function scrollTranscriptBy(delta, reservedBottomLines = 0, renderInput = null) {
-    const lines = buildTranscriptLines();
-    const viewportHeight = transcriptViewportHeight(reservedBottomLines);
-    const nextOffset = clampTranscriptScrollOffset(
-      transcriptScrollOffset + delta,
-      lines.length,
-      viewportHeight,
-    );
-    transcriptScrollOffset = nextOffset;
-    redrawScreen({ renderInput, reservedBottomLines });
-    return true;
-  }
-
-  function handleTranscriptScrollKey(
-    key,
-    reservedBottomLines = 0,
-    renderInput = null,
-  ) {
-    const wheel = parseMouseWheelKey(key);
-    if (wheel === "up") {
-      return scrollTranscriptBy(
-        TRANSCRIPT_SCROLL_STEP,
-        reservedBottomLines,
-        renderInput,
-      );
-    }
-    if (wheel === "down") {
-      return scrollTranscriptBy(
-        -TRANSCRIPT_SCROLL_STEP,
-        reservedBottomLines,
-        renderInput,
-      );
-    }
-    return false;
   }
 
   function redrawScreen({
     pendingLine = "",
     streamingText = "",
     renderInput = null,
-    reservedBottomLines = renderInput ? PROMPT_INPUT_RESERVED_LINES : 0,
+    fullRefresh = false,
   } = {}) {
-    process.stdout.write("\x1b[?25l\x1b[H\x1b[J");
-    if (transcript.length === 0) {
+    if (fullRefresh) {
+      process.stdout.write("\x1b[?25l\x1b[H\x1b[J");
       process.stdout.write("\n");
       splash(context);
-    } else {
-      renderTranscriptViewport(reservedBottomLines);
+      renderedTranscriptEntries = 0;
     }
+
+    for (
+      let index = renderedTranscriptEntries;
+      index < transcript.length;
+      index += 1
+    ) {
+      renderTranscriptEntry(transcript[index]);
+    }
+    renderedTranscriptEntries = transcript.length;
 
     if (pendingLine) {
       process.stdout.write(`${pendingLine}\n`);
@@ -966,7 +891,9 @@ export async function runChatScreen(context) {
       renderInput();
     }
 
-    process.stdout.write("\x1b[?25h");
+    if (fullRefresh) {
+      process.stdout.write("\x1b[?25h");
+    }
     resetLiveRegionState();
   }
 
@@ -994,15 +921,7 @@ export async function runChatScreen(context) {
               .filter((e) => e.role === "user")
               .map((e) => e.text)
               .reverse(),
-            {
-              cwd: context.cwd,
-              onRawKey: (key, renderInput) =>
-                handleTranscriptScrollKey(
-                  key,
-                  PROMPT_INPUT_RESERVED_LINES,
-                  renderInput,
-                ),
-            },
+            { cwd: context.cwd },
           )
         ).trim();
         context.currentSessionDisplayedTokens =
@@ -1018,7 +937,6 @@ export async function runChatScreen(context) {
 
       // Команды
       if (text.startsWith("/")) {
-        transcriptScrollOffset = 0;
         transcript.push({ role: "user", text });
         context.currentSessionMetrics = {
           ...(context.currentSessionMetrics ?? {
@@ -1066,7 +984,7 @@ export async function runChatScreen(context) {
               .filter((m) => m.role === "user" || m.role === "assistant")
               .map((m) => ({ role: m.role, text: m.content })),
           );
-          redrawScreen();
+          redrawScreen({ fullRefresh: true });
         } else {
           if (commandResult?.rendered) {
             continue;
@@ -1115,7 +1033,6 @@ export async function runChatScreen(context) {
         };
       }
 
-      transcriptScrollOffset = 0;
       transcript.push({ role: "user", text });
       debugStepCounter = 0;
       context.currentSessionMetrics = {
@@ -1217,7 +1134,7 @@ export async function runChatScreen(context) {
           expandableTerminalEntry.meta.expanded =
             !expandableTerminalEntry.meta.expanded;
           clearLiveRegion();
-          redrawScreen();
+          redrawScreen({ fullRefresh: true });
         };
         if (process.stdin.isTTY) {
           process.stdin.setRawMode(true);
@@ -1299,12 +1216,12 @@ export async function runChatScreen(context) {
 
       resizeHandler = () => {
         if (shouldStream && activeBlockMode === "stream" && streamedText) {
-          redrawScreen({ reservedBottomLines: LIVE_REGION_RESERVED_LINES });
+          redrawScreen();
           renderStreamingState();
           return;
         }
         if (activeBlockMode === "pending") {
-          redrawScreen({ reservedBottomLines: LIVE_REGION_RESERVED_LINES });
+          redrawScreen();
           renderPendingState();
           return;
         }
@@ -1326,19 +1243,6 @@ export async function runChatScreen(context) {
             if (activeBlockMode === "pending") {
               renderPendingState();
             }
-          },
-          onRawKey: (key) => {
-            const handled = handleTranscriptScrollKey(
-              key,
-              LIVE_REGION_RESERVED_LINES,
-            );
-            if (!handled) return false;
-            if (activeBlockMode === "stream" && streamedText) {
-              renderStreamingState();
-            } else if (activeBlockMode === "pending") {
-              renderPendingState();
-            }
-            return true;
           },
         });
         inputVisible = true;
@@ -1412,7 +1316,7 @@ export async function runChatScreen(context) {
           },
           beforeToolCall: () => {
             if (disableTerminalExpansion()) {
-              redrawScreen();
+              redrawScreen({ fullRefresh: true });
             }
           },
           onAssistantToolIntent: async ({ assistantText }) => {
@@ -1626,7 +1530,7 @@ export async function runChatScreen(context) {
       }
       stopPendingAnimation();
       if (disableTerminalExpansion()) {
-        redrawScreen();
+        redrawScreen({ fullRefresh: true });
       }
       flushStreamRender();
       if (shouldStream) {
