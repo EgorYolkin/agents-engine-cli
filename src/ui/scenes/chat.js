@@ -15,79 +15,21 @@ import { runProviderWithTools } from "../../tools/orchestrator.js";
 import { createSession, recordMessage } from "../../history/session.js";
 import { formatDuration, formatTokenCount } from "../../history/metrics.js";
 import { printMushCard } from "../mush-card.js";
+import { INLINE_TERMINAL_MODE } from "../components/terminal.js";
+import { activeTheme, color } from "../components/theme.js";
+import { frameWidth, fitText } from "../components/layout.js";
+import {
+  buildAiMessageFrame,
+  buildUserMessageFrame,
+  buildToolEventFrame,
+  buildTerminalEventFrame,
+  buildExpandableTerminalEventFrame,
+  createTerminalEventMeta,
+  stripToolMarkup,
+} from "../components/frame.js";
+import { formatPendingLine } from "../components/pending.js";
 
-// ─── Layout ───────────────────────────────────────────────────────────────────
-
-const INLINE_TERMINAL_MODE =
-  "\x1b[?1049l\x1b[?1047l\x1b[?47l\x1b[?1000l\x1b[?1006l\x1b[?1l";
-
-function activeTheme(context) {
-  return context.ui?.theme ?? {};
-}
-
-function color(theme, name, fallback = chalk.white) {
-  return theme.colors?.[name] ?? fallback;
-}
-
-function frameWidth() {
-  const columns = process.stdout.columns || 96;
-  return Math.max(6, columns - 1);
-}
-
-function wrapText(text, width, indent) {
-  const rows = [];
-  const maxWidth = Math.max(1, width);
-
-  for (const rawLine of text.split("\n")) {
-    const words = rawLine.split(/\s+/).filter(Boolean);
-    if (words.length === 0) {
-      rows.push("");
-      continue;
-    }
-
-    let line = "";
-    for (const word of words) {
-      if (word.length > maxWidth) {
-        if (line) {
-          rows.push(line);
-          line = "";
-        }
-
-        for (let start = 0; start < word.length; start += maxWidth) {
-          const chunk = word.slice(start, start + maxWidth);
-          if (chunk.length === maxWidth || start + maxWidth < word.length) {
-            rows.push(`${indent}${chunk}`);
-          } else {
-            line = `${indent}${chunk}`;
-          }
-        }
-        continue;
-      }
-
-      const next = line ? `${line} ${word}` : word;
-      if (next.length > maxWidth && line) {
-        rows.push(line);
-        line = `${indent}${word}`;
-      } else {
-        line = next;
-      }
-    }
-    rows.push(line);
-  }
-
-  return rows;
-}
-
-function visibleLength(value) {
-  return value.length;
-}
-
-function fitText(value, width) {
-  const length = visibleLength(value);
-  if (length <= width) return value + " ".repeat(width - length);
-  if (width <= 1) return " ".repeat(width);
-  return `${value.slice(0, width - 1)}…`;
-}
+// ─── Scene-level helpers ──────────────────────────────────────────────────────
 
 function formatCwd(cwd) {
   const home = os.homedir();
@@ -187,16 +129,6 @@ function inputStatus(context, tokens, { animateSessionTokens = false } = {}) {
   };
 }
 
-const PENDING_SUFFIXES = [".", "..", "...", ".."];
-
-function formatPendingLine(context, frameIndex) {
-  const theme = activeTheme(context);
-  const muted = color(theme, "muted", chalk.dim);
-  const marker = DOT_CHOICES[frameIndex % DOT_CHOICES.length] ?? "⬢";
-  const suffix = PENDING_SUFFIXES[frameIndex % PENDING_SUFFIXES.length];
-  return muted(`${marker} Mushing${suffix}`);
-}
-
 function splash(context) {
   const model = context.runtimeOverrides.model ?? context.config.activeModel;
   const level =
@@ -221,60 +153,12 @@ function splash(context) {
 
 // ─── Messages — вне рамки ─────────────────────────────────────────────────────
 
-function buildMessageLines(text, width) {
-  const lines = [];
-
-  for (const rawLine of text.split("\n")) {
-    const fence = rawLine.match(/^```(\w+)?\s*$/);
-    if (fence) continue;
-
-    const wrapped = wrapText(rawLine, width, "");
-    if (wrapped.length === 0) {
-      lines.push("");
-      continue;
-    }
-
-    lines.push(...wrapped);
-  }
-
-  while (lines.length > 1 && lines.at(-1) === "") {
-    lines.pop();
-  }
-
-  return lines.length > 0 ? lines : [""];
-}
-
-function stripToolMarkup(text) {
-  return (text ?? "")
-    .replace(/```agents-tool[\s\S]*?```/g, "")
-    .replace(/```agents-tool[\s\S]*$/g, "")
-    .trimEnd();
-}
+// ─── Print helpers — own process.stdout.write, call frame builders ────────────
 
 function printUserMessage(text, context) {
   const frame = buildUserMessageFrame(text, context);
   process.stdout.write(frame.text);
   return frame.blockHeight;
-}
-
-function buildUserMessageFrame(text, context) {
-  const theme = activeTheme(context);
-  const symbol =
-    context.config.ui?.message_dot ?? theme.symbols?.messageDot ?? "⬢";
-  const bodyLines = buildMessageLines(
-    text,
-    Math.max(1, (process.stdout.columns || 80) - 4),
-  );
-  const white = chalk.white;
-  const lines = [`${white(`${symbol}\u00A0${bodyLines[0] ?? ""}`)}`];
-  for (let index = 1; index < bodyLines.length; index += 1) {
-    lines.push(`${white(`  ${bodyLines[index]}`)}`);
-  }
-  return {
-    text: `${lines.join("\n")}\n\n`,
-    blockHeight: lines.length + 1,
-    cursorUpLines: lines.length + 1,
-  };
 }
 
 function printAiMessage(text, context) {
@@ -299,84 +183,6 @@ function printExpandableTerminalEventMessage(entry, context) {
   const frame = buildExpandableTerminalEventFrame(entry, context);
   process.stdout.write(frame.text);
   return frame.blockHeight;
-}
-
-function buildAiMessageFrame(text, context) {
-  const theme = activeTheme(context);
-  const symbol =
-    context.config.ui?.message_dot ?? theme.symbols?.messageDot ?? "⬢";
-  const accent = color(theme, "accent", chalk.magenta);
-  const name = theme.layout?.agentName ?? "mr. mush";
-  const contentWidth = Math.max(1, (process.stdout.columns || 80) - 4);
-  const bodyLines = buildMessageLines(text, contentWidth);
-  const lines = [`${accent(`${symbol}\u00A0${name}`)}`];
-  for (const line of bodyLines) {
-    lines.push(`${accent("  ")}${chalk.white(line)}`);
-  }
-  return {
-    text: `${lines.join("\n")}\n\n`,
-    blockHeight: lines.length + 1,
-    cursorUpLines: lines.length + 1,
-  };
-}
-
-function buildToolEventFrame(title, text, context) {
-  const theme = activeTheme(context);
-  const symbol =
-    context.config.ui?.message_dot ?? theme.symbols?.messageDot ?? "⬢";
-  const muted = color(theme, "muted", chalk.dim);
-  const contentWidth = Math.max(1, (process.stdout.columns || 80) - 4);
-  const bodyLines = buildMessageLines(text, contentWidth);
-  const lines = [`${muted(`${symbol}\u00A0${title}`)}`];
-  for (const line of bodyLines) {
-    lines.push(`${muted(`  ${line}`)}`);
-  }
-  return {
-    text: `${lines.join("\n")}\n`,
-    blockHeight: lines.length,
-    cursorUpLines: lines.length,
-  };
-}
-
-function buildTerminalEventFrame(text, context) {
-  const theme = activeTheme(context);
-  const muted = color(theme, "muted", chalk.dim);
-  const symbol =
-    context.config.ui?.message_dot ?? theme.symbols?.messageDot ?? "⬢";
-  const continuationPrefix = "  ";
-  const contentWidth = Math.max(1, (process.stdout.columns || 80) - 4);
-  const bodyLines = buildMessageLines(text, contentWidth);
-  const toolMode = context.toolMode;
-  const terminalLabel =
-    toolMode === "native" ? "Terminal  [native]" : "Terminal";
-  const lines = [muted(`${symbol} ${terminalLabel}`)];
-  for (let index = 0; index < bodyLines.length; index += 1) {
-    lines.push(muted(`${continuationPrefix}${bodyLines[index]}`));
-  }
-  return {
-    text: `${lines.join("\n")}\n\n`,
-    blockHeight: lines.length + 1,
-    cursorUpLines: lines.length + 1,
-  };
-}
-
-function buildExpandableTerminalEventFrame(entry, context) {
-  const text = entry.meta?.expanded ? entry.meta.fullText : entry.text;
-  const frame = buildTerminalEventFrame(text, context);
-  if (entry.meta?.canExpand) {
-    const theme = activeTheme(context);
-    const muted = color(theme, "muted", chalk.dim);
-    const symbol =
-      context.config.ui?.message_dot ?? theme.symbols?.messageDot ?? "⬢";
-    const action = entry.meta.expanded ? "свернуть" : "развернуть";
-    const hint = `\n${muted(`${symbol} Ctrl + O чтобы ${action} вывод`)}\n\n`;
-    return {
-      text: frame.text + hint,
-      blockHeight: frame.blockHeight + 3,
-      cursorUpLines: frame.cursorUpLines + 3,
-    };
-  }
-  return frame;
 }
 
 function buildMessagesFromTranscript(promptStack, transcript, currentPrompt) {
@@ -519,76 +325,6 @@ function formatToolResultMessage(toolCall, toolResult) {
   }
 
   return "";
-}
-
-function createTerminalEventMeta(toolCall, toolResult) {
-  if (!toolCall) return "";
-
-  if (toolCall.name === "bash") {
-    const outputLines = [];
-    const stdout = toolResult?.stdout?.trimEnd();
-    const stderr = toolResult?.stderr?.trimEnd();
-
-    if (stdout) {
-      outputLines.push(...stdout.split("\n").map((line) => `  ${line}`));
-    }
-    if (stderr) {
-      outputLines.push(...stderr.split("\n").map((line) => `  ${line}`));
-    }
-    if (outputLines.length === 0) {
-      outputLines.push(
-        toolResult?.blocked
-          ? "  command blocked"
-          : `  exit code: ${toolResult?.exit_code ?? "–"}`,
-      );
-    }
-
-    const headLines = [
-      `wants to run ${toolCall.args.cmd}`,
-      "",
-      `❯ ${toolCall.args.cmd}`,
-    ];
-    const fullLines = [...headLines, "", ...outputLines];
-    const visibleOutputLines = outputLines.slice(0, 10);
-    const collapsedLines = [...headLines, "", ...visibleOutputLines];
-    const canExpand = outputLines.length >= 10;
-
-    return {
-      kind: "terminal_event",
-      text: collapsedLines.join("\n"),
-      fullText: fullLines.join("\n"),
-      canExpand,
-      expanded: false,
-    };
-  }
-
-  if (toolCall.name === "write_file") {
-    const lines = [
-      `wants to write ${toolCall.args.path}`,
-      "",
-      `❯ write_file ${toolCall.args.path}`,
-    ];
-    if (toolResult?.error?.trim()) {
-      lines.push(
-        "",
-        ...toolResult.error
-          .trim()
-          .split("\n")
-          .map((line) => `  ${line}`),
-      );
-    } else {
-      lines.push("", `  written: ${toolResult?.written ?? 0} bytes`);
-    }
-    return {
-      kind: "terminal_event",
-      text: lines.join("\n"),
-      fullText: lines.join("\n"),
-      canExpand: false,
-      expanded: false,
-    };
-  }
-
-  return null;
 }
 
 function createDebugEventMeta(title = "debug") {

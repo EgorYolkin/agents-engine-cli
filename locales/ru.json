@@ -62,6 +62,10 @@
     "messages": {
       "aborted": "прервано"
     },
+    "terminal": {
+      "expandHint": "Ctrl + O чтобы развернуть вывод",
+      "collapseHint": "Ctrl + O чтобы свернуть вывод"
+    },
     "errors": {
       "requestFailed": "✖ Ошибка: {message}"
     }
@@ -91,6 +95,7 @@
       "profile": "Переключить активный профиль",
       "prompt": "Просмотреть или изменить prompt layers",
       "usage": "Показать общую usage статистику",
+      "update": "Проверить обновления Mr. Mush",
       "debug": "Переключить debug-режим",
       "statusbar": "Настроить status bar",
       "dot": "Выбрать маркер сообщений",
@@ -108,7 +113,9 @@
       "medium": "Средний уровень",
       "high": "Высокий уровень",
       "xhigh": "Максимальный уровень",
-      "dot": "Маркер сообщений"
+      "dot": "Маркер сообщений",
+      "updateCheck": "Проверить последнюю версию",
+      "updateInstall": "Проверить и установить последнюю версию"
     },
     "messages": {
       "thinkingSet": "{tick} thinking: {level}",
@@ -138,8 +145,22 @@
       "usageModelUse": "Использование: /model use <slug>",
       "usageProfileUse": "Использование: /profile use <name>",
       "usageStatusbar": "Использование: /statusbar <template>, например /statusbar {folder} | {model} | {thinking} | {messages} msgs | {session_tokens} tok | {session_time}",
+      "usageUpdate": "Использование: /update [check|install]",
       "unknownPromptSubcommand": "Неизвестная команда /prompt {subcommand}",
       "themeAlreadyExists": "theme file already exists: {path}"
+    }
+  },
+  "update": {
+    "prompts": {
+      "install": "Доступен Mr. Mush {latestVersion} (текущая версия {currentVersion}). Установить сейчас?"
+    },
+    "messages": {
+      "available": "Доступен Mr. Mush {latestVersion} (текущая версия {currentVersion}). Запусти /update install для установки.",
+      "cancelled": "Обновление отменено.",
+      "current": "Mr. Mush обновлен до актуальной версии ({currentVersion}).",
+      "installed": "Обновление установлено. Перезапусти Mr. Mush, чтобы использовать новую версию.",
+      "installFailed": "Установка обновления завершилась с кодом {code}.",
+      "unavailable": "Не удалось проверить обновления прямо сейчас."
     }
   },
   "themeTemplate": {

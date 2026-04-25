@@ -13,6 +13,9 @@ import {
   saveConfig,
   saveState,
 } from "../../config/loader.js";
+import { resetTerminalSurface } from "../components/terminal.js";
+
+export { resetTerminalSurface };
 
 const execFileAsync = promisify(execFile);
 
@@ -20,10 +23,6 @@ const onCancel = (i18n) => {
   p.cancel(i18n.t("setup.cancelled"));
   process.exit(0);
 };
-
-export function resetTerminalSurface() {
-  process.stdout.write("\x1b[?25h\x1b[2J\x1b[3J\x1b[H\r\x1b[J");
-}
 
 async function isBinaryInstalled(bin) {
   try {
