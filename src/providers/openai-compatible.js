@@ -19,6 +19,30 @@ function parseStreamLine(line) {
   return JSON.parse(data);
 }
 
+/**
+ * Accumulate streaming tool_calls deltas into a complete array.
+ * OpenAI sends arguments as incremental string chunks across multiple deltas.
+ *
+ * @param {object[]} accumulated - Current state (mutated in place)
+ * @param {object[]} deltas - tool_calls array from a delta chunk
+ */
+function accumulateToolCallDeltas(accumulated, deltas) {
+  for (const delta of deltas) {
+    const idx = delta.index ?? 0;
+    if (!accumulated[idx]) {
+      accumulated[idx] = { id: delta.id ?? "", function: { name: "", arguments: "" } };
+    }
+    const entry = accumulated[idx];
+    if (delta.id) entry.id = delta.id;
+    if (delta.function?.name) entry.function.name += delta.function.name;
+    if (delta.function?.arguments) entry.function.arguments += delta.function.arguments;
+  }
+}
+
+/**
+ * @typedef {{ name: string, description: string, parameters: object }} ToolDefinition
+ */
+
 export async function openAiCompatibleChat({
   baseUrl,
   providerName,
@@ -30,12 +54,21 @@ export async function openAiCompatibleChat({
   messages = null,
   signal = null,
   onToken = null,
+  tools = null,
 }) {
   const stream = typeof onToken === "function";
   const abortCtrl = new AbortController();
   if (signal) {
     signal.addEventListener("abort", () => abortCtrl.abort(), { once: true });
   }
+
+  const body = {
+    model,
+    messages: messages ?? buildMessages(promptStack, prompt),
+    stream,
+    ...(stream ? { stream_options: { include_usage: true } } : {}),
+    ...(tools?.length ? { tools, tool_choice: "auto" } : {}),
+  };
 
   const res = await fetch(`${baseUrl}/v1/chat/completions`, {
     method: "POST",
@@ -44,31 +77,29 @@ export async function openAiCompatibleChat({
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       ...headers,
     },
-    body: JSON.stringify({
-      model,
-      messages: messages ?? buildMessages(promptStack, prompt),
-      stream,
-      ...(stream ? { stream_options: { include_usage: true } } : {}),
-    }),
+    body: JSON.stringify(body),
     signal: abortCtrl.signal,
   });
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${providerName}: ${res.status} ${body}`);
+    const bodyText = await res.text();
+    throw new Error(`${providerName}: ${res.status} ${bodyText}`);
   }
 
   if (!stream) {
     const data = await res.json();
+    const message = data.choices?.[0]?.message ?? {};
     return {
-      text: data.choices?.[0]?.message?.content ?? "",
+      text: message.content ?? "",
       usage: data.usage ?? null,
+      toolCalls: message.tool_calls ?? [],
     };
   }
 
   let text = "";
   let usage = null;
   let buffer = "";
+  const accumulatedToolCalls = [];
 
   try {
     for await (const chunk of res.body) {
@@ -80,10 +111,14 @@ export async function openAiCompatibleChat({
         const event = parseStreamLine(line);
         if (!event) continue;
 
-        const token = event.choices?.[0]?.delta?.content ?? "";
+        const delta = event.choices?.[0]?.delta ?? {};
+        const token = delta.content ?? "";
         if (token) {
           text += token;
           onToken(token);
+        }
+        if (delta.tool_calls?.length) {
+          accumulateToolCallDeltas(accumulatedToolCalls, delta.tool_calls);
         }
         usage = event.usage ?? usage;
       }
@@ -92,10 +127,14 @@ export async function openAiCompatibleChat({
     buffer += decoder.decode();
     if (buffer.trim()) {
       const event = parseStreamLine(buffer);
-      const token = event?.choices?.[0]?.delta?.content ?? "";
+      const delta = event?.choices?.[0]?.delta ?? {};
+      const token = delta.content ?? "";
       if (token) {
         text += token;
         onToken(token);
+      }
+      if (delta.tool_calls?.length) {
+        accumulateToolCallDeltas(accumulatedToolCalls, delta.tool_calls);
       }
       usage = event?.usage ?? usage;
     }
@@ -104,5 +143,5 @@ export async function openAiCompatibleChat({
     throw err;
   }
 
-  return { text, usage };
+  return { text, usage, toolCalls: accumulatedToolCalls };
 }

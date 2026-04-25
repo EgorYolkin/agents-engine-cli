@@ -13,7 +13,10 @@ import {
   userConfigSchema,
 } from "./schema.js";
 
-const TOOLS_FILE_OPS_PROMPT_URL = new URL("../prompts/tools-file-ops.md", import.meta.url);
+const TOOLS_FILE_OPS_PROMPT_URL = new URL(
+  "../prompts/tools-file-ops.md",
+  import.meta.url,
+);
 
 const APP_DIR_NAME = ".mrmush";
 const CONFIG_FILE_NAME = "config.toml";
@@ -25,7 +28,7 @@ const LEGACY_DEFAULT_SYSTEM_PROMPT = [
   "",
   "When you need to inspect the local project, request a tool call with exactly one fenced block:",
   "```agents-tool",
-  "{\"name\":\"bash\",\"args\":{\"cmd\":\"git status --short\"}}",
+  '{"name":"bash","args":{"cmd":"git status --short"}}',
   "```",
   "Do not wrap tool calls in additional JSON or prose. After receiving a tool result, use it to answer the user.",
 ].join("\n");
@@ -42,12 +45,12 @@ const DEFAULT_SYSTEM_PROMPT = [
   "",
   "When you need to inspect the local project, request a tool call with exactly one fenced block:",
   "```agents-tool",
-  "{\"name\":\"bash\",\"args\":{\"cmd\":\"git status --short\"}}",
+  '{"name":"bash","args":{"cmd":"git status --short"}}',
   "```",
   "",
   "When you need to create or replace a file, request a tool call with exactly one fenced block:",
   "```agents-tool",
-  "{\"name\":\"write_file\",\"args\":{\"path\":\"src/example.js\",\"content\":\"export const value = 1;\\n\"}}",
+  '{"name":"write_file","args":{"path":"src/example.js","content":"export const value = 1;\\n"}}',
   "```",
   "Do not wrap tool calls in additional JSON or prose. After receiving a tool result, use it to answer the user.",
 ].join("\n");
@@ -67,18 +70,29 @@ const DEFAULT_PROVIDER_PROMPTS = {
 
 function mergeObjects(base, override) {
   if (override === undefined) return structuredClone(base);
-  if (Array.isArray(base) || Array.isArray(override)) return structuredClone(override);
-  if (!base || !override || typeof base !== "object" || typeof override !== "object") {
+  if (Array.isArray(base) || Array.isArray(override))
+    return structuredClone(override);
+  if (
+    !base ||
+    !override ||
+    typeof base !== "object" ||
+    typeof override !== "object"
+  ) {
     return structuredClone(override);
   }
 
   const result = { ...base };
   for (const [key, value] of Object.entries(override)) {
     const existing = result[key];
-    result[key] = existing && value && typeof existing === "object" && typeof value === "object"
-      && !Array.isArray(existing) && !Array.isArray(value)
-      ? mergeObjects(existing, value)
-      : structuredClone(value);
+    result[key] =
+      existing &&
+      value &&
+      typeof existing === "object" &&
+      typeof value === "object" &&
+      !Array.isArray(existing) &&
+      !Array.isArray(value)
+        ? mergeObjects(existing, value)
+        : structuredClone(value);
   }
   return result;
 }
@@ -107,7 +121,10 @@ function applyEnvOverrides(config, env) {
   if (env.MRMUSH_MODEL) result.active_model = env.MRMUSH_MODEL;
   if (env.MRMUSH_PROFILE) result.active_profile = env.MRMUSH_PROFILE;
   if (env.MRMUSH_THINKING) {
-    result.reasoning = { ...result.reasoning, default_effort: env.MRMUSH_THINKING };
+    result.reasoning = {
+      ...result.reasoning,
+      default_effort: env.MRMUSH_THINKING,
+    };
   }
 
   return result;
@@ -137,7 +154,10 @@ async function fileExists(filePath) {
   }
 }
 
-export async function hasGlobalConfig({ cwd = process.cwd(), homeDir = os.homedir() } = {}) {
+export async function hasGlobalConfig({
+  cwd = process.cwd(),
+  homeDir = os.homedir(),
+} = {}) {
   const paths = getAppPaths(cwd, homeDir);
   return fileExists(paths.configFile);
 }
@@ -164,7 +184,11 @@ async function readBundledText(fileUrl) {
   return fs.readFile(fileUrl, "utf8");
 }
 
-async function ensurePromptFile(filePath, expectedContent, legacyContent = null) {
+async function ensurePromptFile(
+  filePath,
+  expectedContent,
+  legacyContent = null,
+) {
   const nextContent = `${expectedContent}\n`;
   if (!(await fileExists(filePath))) {
     await fs.writeFile(filePath, nextContent, "utf8");
@@ -205,9 +229,11 @@ export function getAppPaths(cwd = process.cwd(), homeDir = os.homedir()) {
     promptsDir,
     systemPromptFile: path.join(promptsDir, "system.md"),
     profilesDir: path.join(promptsDir, "profiles"),
-    profilePromptFile: (profile) => path.join(promptsDir, "profiles", `${profile}.md`),
+    profilePromptFile: (profile) =>
+      path.join(promptsDir, "profiles", `${profile}.md`),
     providerPromptsDir: path.join(promptsDir, "providers"),
-    providerPromptFile: (providerId) => path.join(promptsDir, "providers", `${providerId}.md`),
+    providerPromptFile: (providerId) =>
+      path.join(promptsDir, "providers", `${providerId}.md`),
     stateDir: path.join(rootDir, "state"),
     stateFile: path.join(rootDir, "state", "state.json"),
     cacheDir: path.join(rootDir, "cache"),
@@ -221,7 +247,11 @@ export function getAppPaths(cwd = process.cwd(), homeDir = os.homedir()) {
   };
 }
 
-export async function bootstrapConfig({ cwd = process.cwd(), homeDir = os.homedir(), detectedProviders = [] } = {}) {
+export async function bootstrapConfig({
+  cwd = process.cwd(),
+  homeDir = os.homedir(),
+  detectedProviders = [],
+} = {}) {
   const paths = getAppPaths(cwd, homeDir);
 
   await Promise.all([
@@ -236,8 +266,10 @@ export async function bootstrapConfig({ cwd = process.cwd(), homeDir = os.homedi
     ensureDir(paths.historyDir),
   ]);
 
-  const defaultProvider = detectedProviders[0]?.id ?? builtInConfig.active_provider;
-  const defaultModel = detectedProviders[0]?.defaultModel ?? builtInConfig.active_model;
+  const defaultProvider =
+    detectedProviders[0]?.id ?? builtInConfig.active_provider;
+  const defaultModel =
+    detectedProviders[0]?.defaultModel ?? builtInConfig.active_model;
 
   const config = mergeObjects(builtInConfig, {
     active_provider: defaultProvider,
@@ -258,24 +290,38 @@ export async function bootstrapConfig({ cwd = process.cwd(), homeDir = os.homedi
     LEGACY_DEFAULT_SYSTEM_PROMPT,
   );
   if (!(await fileExists(paths.profilePromptFile("default")))) {
-    await fs.writeFile(paths.profilePromptFile("default"), `${DEFAULT_PROFILE_PROMPT}\n`, "utf8");
+    await fs.writeFile(
+      paths.profilePromptFile("default"),
+      `${DEFAULT_PROFILE_PROMPT}\n`,
+      "utf8",
+    );
   }
 
-  await Promise.all(Object.entries(DEFAULT_PROVIDER_PROMPTS).map(async ([providerId, text]) => {
-    const filePath = paths.providerPromptFile(providerId);
-    if (!(await fileExists(filePath))) {
-      await fs.writeFile(filePath, `${text}\n`, "utf8");
-    }
-  }));
+  await Promise.all(
+    Object.entries(DEFAULT_PROVIDER_PROMPTS).map(async ([providerId, text]) => {
+      const filePath = paths.providerPromptFile(providerId);
+      if (!(await fileExists(filePath))) {
+        await fs.writeFile(filePath, `${text}\n`, "utf8");
+      }
+    }),
+  );
 
   if (!(await fileExists(paths.stateFile))) {
-    await fs.writeFile(paths.stateFile, JSON.stringify({
-      schemaVersion: 1,
-      bootstrapCompletedAt: new Date().toISOString(),
-      lastUsedProvider: defaultProvider,
-      lastUsedModel: defaultModel,
-      lastUsedProfile: config.active_profile,
-    }, null, 2), "utf8");
+    await fs.writeFile(
+      paths.stateFile,
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          bootstrapCompletedAt: new Date().toISOString(),
+          lastUsedProvider: defaultProvider,
+          lastUsedModel: defaultModel,
+          lastUsedProfile: config.active_profile,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
   }
 
   return paths;
@@ -285,7 +331,10 @@ export async function backupFile(filePath, paths = getAppPaths()) {
   if (!(await fileExists(filePath))) return null;
   await ensureDir(paths.backupsDir);
   const stamp = new Date().toISOString().replaceAll(":", "-");
-  const target = path.join(paths.backupsDir, `${path.basename(filePath)}.${stamp}.bak`);
+  const target = path.join(
+    paths.backupsDir,
+    `${path.basename(filePath)}.${stamp}.bak`,
+  );
   await fs.copyFile(filePath, target);
   return target;
 }
@@ -316,12 +365,19 @@ export async function saveConfig(config, paths = getAppPaths()) {
   return validated;
 }
 
-export async function saveConfigPatch(dottedPath, value, { scope = "global", cwd = process.cwd(), homeDir = os.homedir() } = {}) {
+export async function saveConfigPatch(
+  dottedPath,
+  value,
+  { scope = "global", cwd = process.cwd(), homeDir = os.homedir() } = {},
+) {
   const paths = getAppPaths(cwd, homeDir);
-  const filePath = scope === "project" ? paths.projectConfigFile : paths.configFile;
+  const filePath =
+    scope === "project" ? paths.projectConfigFile : paths.configFile;
   const current = (await readTomlFile(filePath)) ?? {};
   const patched = setAtPath(structuredClone(current), dottedPath, value);
-  const validated = userConfigSchema.parse(mergeObjects(builtInConfig, patched));
+  const validated = userConfigSchema.parse(
+    mergeObjects(builtInConfig, patched),
+  );
 
   await ensureDir(path.dirname(filePath));
   await backupFile(filePath, paths);
@@ -348,28 +404,51 @@ export async function resolvePromptStack(resolvedConfig, cwd = process.cwd()) {
   const { paths } = resolvedConfig;
   const profile = resolvedConfig.activeProfile;
   const providerId = resolvedConfig.activeProvider;
-  const bashEnabled = resolvedConfig.tools?.bash?.enabled ?? builtInConfig.tools.bash.enabled;
+  const bashEnabled =
+    resolvedConfig.tools?.bash?.enabled ?? builtInConfig.tools.bash.enabled;
   const repoMapEnabled =
-    resolvedConfig.intelligence?.repo_map?.enabled
-    ?? builtInConfig.intelligence.repo_map.enabled;
+    resolvedConfig.intelligence?.repo_map?.enabled ??
+    builtInConfig.intelligence.repo_map.enabled;
   const agentsEngineFile = await findProjectFileUpwards(cwd, "MRMUSH.md");
   const agentsFile = await findProjectFileUpwards(cwd, "AGENTS.md");
   const repoMapResult = repoMapEnabled
     ? await getRepoMapResult(cwd, {
         mode: resolvedConfig.intelligence?.repo_map?.mode,
         tokenBudget: resolvedConfig.intelligence?.repo_map?.token_budget,
-        maxSymbolsPerFile: resolvedConfig.intelligence?.repo_map?.max_symbols_per_file,
-        includeInternalSymbols: resolvedConfig.intelligence?.repo_map?.include_internal_symbols,
+        maxSymbolsPerFile:
+          resolvedConfig.intelligence?.repo_map?.max_symbols_per_file,
+        includeInternalSymbols:
+          resolvedConfig.intelligence?.repo_map?.include_internal_symbols,
         deniedPaths: resolvedConfig.intelligence?.repo_map?.denied_paths,
       })
     : { text: "", stats: null };
   const layers = [
-    { id: "project-mrmush", source: agentsEngineFile, content: agentsEngineFile ? await maybeReadText(agentsEngineFile) : null },
+    {
+      id: "project-mrmush",
+      source: agentsEngineFile,
+      content: agentsEngineFile ? await maybeReadText(agentsEngineFile) : null,
+    },
     { id: "built-in", source: "built-in", content: DEFAULT_SYSTEM_PROMPT },
-    { id: "global-system", source: paths.systemPromptFile, content: await maybeReadText(paths.systemPromptFile) },
-    { id: "profile", source: paths.profilePromptFile(profile), content: await maybeReadText(paths.profilePromptFile(profile)) },
-    { id: "provider", source: paths.providerPromptFile(providerId), content: await maybeReadText(paths.providerPromptFile(providerId)) },
-    { id: "project-agents", source: agentsFile, content: agentsFile ? await maybeReadText(agentsFile) : null },
+    {
+      id: "global-system",
+      source: paths.systemPromptFile,
+      content: await maybeReadText(paths.systemPromptFile),
+    },
+    {
+      id: "profile",
+      source: paths.profilePromptFile(profile),
+      content: await maybeReadText(paths.profilePromptFile(profile)),
+    },
+    {
+      id: "provider",
+      source: paths.providerPromptFile(providerId),
+      content: await maybeReadText(paths.providerPromptFile(providerId)),
+    },
+    {
+      id: "project-agents",
+      source: agentsFile,
+      content: agentsFile ? await maybeReadText(agentsFile) : null,
+    },
     {
       id: "repo-map",
       source: "repo-map",
@@ -379,9 +458,15 @@ export async function resolvePromptStack(resolvedConfig, cwd = process.cwd()) {
     {
       id: "tools-file-ops",
       source: fileURLToPath(TOOLS_FILE_OPS_PROMPT_URL),
-      content: bashEnabled ? await readBundledText(TOOLS_FILE_OPS_PROMPT_URL) : null,
+      content: bashEnabled
+        ? await readBundledText(TOOLS_FILE_OPS_PROMPT_URL)
+        : null,
     },
-    { id: "project-system", source: paths.projectPromptFile, content: await maybeReadText(paths.projectPromptFile) },
+    {
+      id: "project-system",
+      source: paths.projectPromptFile,
+      content: await maybeReadText(paths.projectPromptFile),
+    },
   ].filter((layer) => layer.content && layer.content.trim().length > 0);
 
   return {
@@ -390,7 +475,12 @@ export async function resolvePromptStack(resolvedConfig, cwd = process.cwd()) {
   };
 }
 
-export async function loadConfig({ cwd = process.cwd(), env = process.env, runtimeOverrides = {}, homeDir = os.homedir() } = {}) {
+export async function loadConfig({
+  cwd = process.cwd(),
+  env = process.env,
+  runtimeOverrides = {},
+  homeDir = os.homedir(),
+} = {}) {
   const paths = getAppPaths(cwd, homeDir);
   await ensureDir(paths.rootDir);
   await ensureDir(paths.promptsDir);
@@ -405,33 +495,36 @@ export async function loadConfig({ cwd = process.cwd(), env = process.env, runti
   const projectConfig = (await readTomlFile(paths.projectConfigFile)) ?? {};
 
   const merged = mergeObjects(
-    mergeObjects(
-      mergeObjects(builtInConfig, globalConfig),
-      projectConfig,
-    ),
+    mergeObjects(mergeObjects(builtInConfig, globalConfig), projectConfig),
     runtimeOverrides.config ?? {},
   );
   const withMigratedUi = migrateLegacyStatusbar(merged);
   const withEnv = applyEnvOverrides(withMigratedUi, env);
   const validated = userConfigSchema.parse(withEnv);
-  const activeProvider = runtimeOverrides.providerId ?? validated.active_provider;
+  const activeProvider =
+    runtimeOverrides.providerId ?? validated.active_provider;
   const activeProfile = runtimeOverrides.profile ?? validated.active_profile;
   const activeProviderSettings = validated.providers[activeProvider] ?? {};
-  const activeModel = runtimeOverrides.model
-    ?? activeProviderSettings.model
-    ?? validated.active_model
-    ?? builtInConfig.active_model;
-  const thinkingLevel = runtimeOverrides.thinkingLevel
-    ?? activeProviderSettings.reasoning_effort
-    ?? validated.reasoning.default_effort
-    ?? builtInConfig.reasoning.default_effort;
-  const promptStack = await resolvePromptStack({
-    paths,
-    activeProfile,
-    activeProvider,
-    intelligence: validated.intelligence,
-    tools: validated.tools,
-  }, cwd);
+  const activeModel =
+    runtimeOverrides.model ??
+    activeProviderSettings.model ??
+    validated.active_model ??
+    builtInConfig.active_model;
+  const thinkingLevel =
+    runtimeOverrides.thinkingLevel ??
+    activeProviderSettings.reasoning_effort ??
+    validated.reasoning.default_effort ??
+    builtInConfig.reasoning.default_effort;
+  const promptStack = await resolvePromptStack(
+    {
+      paths,
+      activeProfile,
+      activeProvider,
+      intelligence: validated.intelligence,
+      tools: validated.tools,
+    },
+    cwd,
+  );
   const state = await loadState(paths);
 
   return {

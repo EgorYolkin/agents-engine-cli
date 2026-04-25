@@ -1,6 +1,7 @@
 import { runSetupScreen } from "./ui/scenes/setup.js";
 import { runChatScreen } from "./ui/scenes/chat.js";
 import { bootstrapConfig, hasGlobalConfig, loadConfig } from "./config/loader.js";
+import { runStartupUpdateCheck } from "./update/flow.js";
 
 export class Router {
   constructor(context, ui) {
@@ -34,6 +35,7 @@ export class Router {
         } else {
           this.currentScene = "setup";
         }
+        await runStartupUpdateCheck(this.context).catch(() => null);
         break;
       }
       case "setup": {

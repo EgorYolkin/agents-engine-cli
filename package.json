@@ -1,10 +1,11 @@
 {
   "name": "mr-mush",
-  "version": "1.1.5",
+  "version": "1.2.2",
   "type": "module",
   "bin": {
     "mr-mush": "./bin/mr-mush.js",
-    "mrmush": "./bin/mr-mush.js"
+    "mrmush": "./bin/mr-mush.js",
+    "mr-mush-harbor": "./bin/mr-mush-harbor.js"
   },
   "scripts": {
     "test": "node --test"

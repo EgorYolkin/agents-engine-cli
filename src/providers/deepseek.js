@@ -12,6 +12,7 @@ export const deepseekProvider = {
   source: "api",
   binary: "env",
   defaultModel: "deepseek-chat",
+  capabilities: { toolCalling: true },
 
   getAuthRequirements(resolvedConfig) {
     return resolvedConfig.auth.deepseek;
@@ -57,6 +58,7 @@ export const deepseekProvider = {
       messages: options.messages ?? null,
       signal,
       onToken: options.onToken,
+      tools: options.tools ?? null,
     });
   },
 };

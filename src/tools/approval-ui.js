@@ -1,5 +1,10 @@
 import chalk from "chalk";
 
+function shouldAutoApproveTools(env = process.env) {
+  const value = env.MRMUSH_AUTO_APPROVE_TOOLS;
+  return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
 const BASH_OPTIONS = [
   { value: "once", label: "Run once" },
   { value: "always", label: "Always allow in this project" },
@@ -89,6 +94,8 @@ function clear(renderedLines) {
 }
 
 export async function requestBashApproval(cmd) {
+  if (shouldAutoApproveTools()) return "always";
+
   return new Promise((resolve) => {
     let selectedIdx = 0;
     let hasRendered = false;
@@ -152,6 +159,8 @@ export async function requestBashApproval(cmd) {
 }
 
 export async function requestWriteApproval({ path, content, existingContent = null }) {
+  if (shouldAutoApproveTools()) return "write";
+
   return new Promise((resolve) => {
     let selectedIdx = 0;
     let hasRendered = false;

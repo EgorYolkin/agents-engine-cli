@@ -12,6 +12,8 @@ export const anthropicProvider = {
   source: "cli",
   binary: "claude",
   defaultModel: "claude-sonnet-4-6",
+  // Shells out to the claude CLI — no direct HTTP API, native tool calling unavailable.
+  capabilities: { toolCalling: false },
 
   async fetchModels() {
     return MODELS;

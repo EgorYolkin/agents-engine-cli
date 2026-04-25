@@ -4,6 +4,7 @@ import { runBashCommand } from "./bash.js";
 import { evaluateWritePolicy, readExistingFile, writeFile } from "./file-write.js";
 import { formatToolResultForModel, parseToolCall } from "./parser.js";
 import { evaluateBashPolicy } from "./policy.js";
+import { runWithNativeTools } from "./native-loop.js";
 
 function toolErrorResult(call, message) {
   if (call?.name === "write_file") {
@@ -49,7 +50,101 @@ function markerSuffixLength(value, marker) {
   return 0;
 }
 
-export async function runProviderWithTools({
+/**
+ * Execute a single tool call through policy checks, approval, and execution.
+ * Shared between markdown and native tool calling loops.
+ *
+ * @param {{ name: string, args: object }} call
+ * @param {{ bash?: object, files?: object }} toolConfig
+ * @param {{ cwd: string }} context
+ * @param {{ beforeApproval?: Function|null, afterApproval?: Function|null }} callbacks
+ * @returns {Promise<object>} Tool result
+ */
+export async function executeToolCall(call, toolConfig, context, callbacks = {}) {
+  const bashToolConfig = toolConfig?.bash ?? {};
+  const fileToolConfig = toolConfig?.files ?? {};
+  const { beforeApproval = null, afterApproval = null } = callbacks;
+
+  if (call.name === "bash") {
+    if (!bashToolConfig.enabled) {
+      return toolErrorResult(call, "bash tool is disabled");
+    }
+    const cmd = call.args.cmd;
+    const policy = evaluateBashPolicy(cmd, bashToolConfig);
+    if (!policy.ok) {
+      return toolErrorResult(call, policy.error);
+    }
+    const approved = await isCommandApproved(context.cwd, cmd);
+    if (!approved && beforeApproval) beforeApproval();
+    const approval = approved ? "always" : await requestBashApproval(cmd);
+    if (!approved && afterApproval) afterApproval();
+    if (approval === "always" && !approved) {
+      await approveCommand(context.cwd, cmd);
+    }
+    if (approval === "reject") {
+      return toolErrorResult(call, "User rejected tool execution");
+    }
+    return runBashCommand({
+      argv: policy.argv,
+      cmd,
+      cwd: context.cwd,
+      timeoutMs: bashToolConfig.timeout_ms ?? 30_000,
+      maxOutputChars: bashToolConfig.max_output_chars ?? 20_000,
+      shell: policy.shell ?? false,
+    });
+  }
+
+  if (call.name === "write_file") {
+    if (!fileToolConfig.write_enabled) {
+      return toolErrorResult(call, "write_file tool is disabled");
+    }
+    const policy = evaluateWritePolicy(call.args.path, context.cwd, {
+      ...fileToolConfig,
+      content: call.args.content,
+    });
+    if (!policy.ok) {
+      return toolErrorResult(call, policy.error);
+    }
+    const existingContent = await readExistingFile(policy.resolved);
+    if (beforeApproval) beforeApproval();
+    const approval = await requestWriteApproval({ ...call.args, existingContent });
+    if (afterApproval) afterApproval();
+    if (approval === "reject") {
+      return toolErrorResult(call, "User rejected write");
+    }
+    return writeFile({ ...call.args, cwd: context.cwd });
+  }
+
+  return toolErrorResult(call, `Unsupported tool: ${call.name}`);
+}
+
+/**
+ * Determine whether the provider supports native tool calling for the given config.
+ *
+ * @param {object} provider
+ * @param {object} config
+ * @returns {Promise<boolean>}
+ */
+async function resolveToolCallCapability(provider, config) {
+  if (config.tools?.force_markdown) return false;
+
+  const capability = provider.capabilities?.toolCalling;
+  if (capability === true) return true;
+  if (capability === false || capability == null) return false;
+
+  // 'dynamic' — ask the provider (e.g. Ollama model detection)
+  if (typeof provider.supportsToolCalling === "function") {
+    const model = config.activeModel ?? config.active_model;
+    return provider.supportsToolCalling(model).catch(() => false);
+  }
+
+  return false;
+}
+
+/**
+ * Markdown-based tool calling loop (original implementation).
+ */
+async function runWithMarkdownTools({
   provider,
   config,
   prompt,
@@ -65,7 +160,6 @@ export async function runProviderWithTools({
   onToolResult = null,
 }) {
   const bashToolConfig = config.tools?.bash ?? {};
-  const fileToolConfig = config.tools?.files ?? {};
   const maxCalls = bashToolConfig.max_calls ?? 8;
   let currentPrompt = prompt;
   let lastResponse = null;
@@ -122,67 +216,10 @@ export async function runProviderWithTools({
     } else if (callIndex >= maxCalls) {
       toolResult = toolErrorResult(parsed.call, `tool call limit exceeded (${maxCalls})`);
     } else {
-      if (parsed.call.name === "bash") {
-        if (!bashToolConfig.enabled) {
-          toolResult = toolErrorResult(parsed.call, "bash tool is disabled");
-        } else {
-          const cmd = parsed.call.args.cmd;
-          const policy = evaluateBashPolicy(cmd, bashToolConfig);
-          if (!policy.ok) {
-            toolResult = toolErrorResult(parsed.call, policy.error);
-          } else {
-            const approved = await isCommandApproved(context.cwd, cmd);
-            if (!approved && beforeApproval) beforeApproval();
-            const approval = approved ? "always" : await requestBashApproval(cmd);
-            if (!approved && afterApproval) afterApproval();
-            if (approval === "always" && !approved) {
-              await approveCommand(context.cwd, cmd);
-            }
-            if (approval === "reject") {
-              toolResult = toolErrorResult(parsed.call, "User rejected tool execution");
-            } else {
-              toolResult = await runBashCommand({
-                argv: policy.argv,
-                cmd,
-                cwd: context.cwd,
-                timeoutMs: bashToolConfig.timeout_ms ?? 30_000,
-                maxOutputChars: bashToolConfig.max_output_chars ?? 20_000,
-                shell: policy.shell ?? false,
-              });
-            }
-          }
-        }
-      } else if (parsed.call.name === "write_file") {
-        if (!fileToolConfig.write_enabled) {
-          toolResult = toolErrorResult(parsed.call, "write_file tool is disabled");
-        } else {
-          const policy = evaluateWritePolicy(parsed.call.args.path, context.cwd, {
-            ...fileToolConfig,
-            content: parsed.call.args.content,
-          });
-          if (!policy.ok) {
-            toolResult = toolErrorResult(parsed.call, policy.error);
-          } else {
-            const existingContent = await readExistingFile(policy.resolved);
-            if (beforeApproval) beforeApproval();
-            const approval = await requestWriteApproval({
-              ...parsed.call.args,
-              existingContent,
-            });
-            if (afterApproval) afterApproval();
-            if (approval === "reject") {
-              toolResult = toolErrorResult(parsed.call, "User rejected write");
-            } else {
-              toolResult = await writeFile({
-                ...parsed.call.args,
-                cwd: context.cwd,
-              });
-            }
-          }
-        }
-      } else {
-        toolResult = toolErrorResult(parsed.call, `Unsupported tool: ${parsed.call.name}`);
-      }
+      toolResult = await executeToolCall(parsed.call, config.tools, context, {
+        beforeApproval,
+        afterApproval,
+      });
     }
 
     currentPrompt = buildFollowupPrompt({
@@ -200,4 +237,83 @@ export async function runProviderWithTools({
   }
 
   return lastResponse ?? { text: "", usage: null };
+}
+
+/**
+ * Run a provider with tool calling support.
+ * Automatically selects native or markdown strategy based on provider capabilities.
+ *
+ * @param {object} params
+ * @param {object} params.provider
+ * @param {object} params.config
+ * @param {string} params.prompt
+ * @param {object[]|null} params.messages
+ * @param {object} params.runtimeOverrides
+ * @param {AbortSignal|null} params.signal
+ * @param {object} params.context
+ * @param {Function|null} params.onToken
+ * @param {Function|null} params.beforeApproval
+ * @param {Function|null} params.afterApproval
+ * @param {Function|null} params.beforeToolCall
+ * @param {Function|null} params.onAssistantToolIntent
+ * @param {Function|null} params.onToolResult
+ * @returns {Promise<{ text: string, usage: object|null }>}
+ */
+export async function runProviderWithTools({
+  provider,
+  config,
+  prompt,
+  messages = null,
+  runtimeOverrides,
+  signal,
+  context,
+  onToken,
+  beforeApproval = null,
+  afterApproval = null,
+  beforeToolCall = null,
+  onAssistantToolIntent = null,
+  onToolResult = null,
+}) {
+  const useNative = await resolveToolCallCapability(provider, config);
+
+  if (context) context.toolMode = useNative ? "native" : "markdown";
+
+  if (process.env.MRMUSH_DEBUG) {
+    process.stderr.write(`[tool-strategy] ${useNative ? "native" : "markdown"} (provider: ${provider.id})\n`);
+  }
+
+  if (useNative) {
+    return runWithNativeTools({
+      provider,
+      config,
+      prompt,
+      messages,
+      runtimeOverrides,
+      signal,
+      context,
+      onToken,
+      beforeApproval,
+      afterApproval,
+      beforeToolCall,
+      onAssistantToolIntent,
+      onToolResult,
+      executeToolCall,
+    });
+  }
+
+  return runWithMarkdownTools({
+    provider,
+    config,
+    prompt,
+    messages,
+    runtimeOverrides,
+    signal,
+    context,
+    onToken,
+    beforeApproval,
+    afterApproval,
+    beforeToolCall,
+    onAssistantToolIntent,
+    onToolResult,
+  });
 }

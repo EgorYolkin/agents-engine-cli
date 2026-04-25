@@ -47,6 +47,12 @@ npm link
 mr-mush
 ```
 
+Для Harbor / Terminal-Bench 2.0:
+
+```bash
+mr-mush-harbor --instruction "inspect the repo and fix the failing test" --provider ollama --model qwen2.5-coder:7b
+```
+
 ## Конфиг
 
 Глобальный конфиг:
@@ -152,4 +158,24 @@ allowed_git_subcommands = ["status", "diff", "log", "show"]
 ```bash
 node --check src/ui/scenes/chat.js
 node --check src/ui/input.js
+```
+
+### Harbor adapter
+
+В репозитории есть Harbor adapter для Terminal-Bench 2.0:
+
+```text
+integrations/harbor/mr_mush_agent.py
+```
+
+Пример локального запуска с Docker и локальной Ollama:
+
+```bash
+harbor run \
+  --dataset terminal-bench@2.0 \
+  --agent-import-path integrations.harbor.mr_mush_agent:MrMushHarborAgent \
+  --model ollama/qwen2.5-coder:7b \
+  --agent-kwarg source_path=/absolute/path/to/agents-engine-cli \
+  --agent-kwarg ollama_base_url=http://host.docker.internal:11434 \
+  --n-concurrent 1
 ```

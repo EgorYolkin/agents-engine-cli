@@ -8,6 +8,19 @@ export const lmstudioProvider = {
   source: "api",
   binary: null,
   defaultModel: "local-model",
+  // LM Studio supports OpenAI-compatible tool calling for capable models (v0.3+).
+  // Use 'dynamic' so the user can override via force_markdown if their model doesn't support it.
+  capabilities: { toolCalling: "dynamic" },
+
+  /**
+   * LM Studio doesn't expose a capability API — we optimistically try native tool calling.
+   * If the model doesn't support tools, the API returns no tool_calls and we fall through gracefully.
+   *
+   * @returns {Promise<boolean>}
+   */
+  async supportsToolCalling() {
+    return true;
+  },
 
   async isAvailable() {
     try {
@@ -37,6 +50,7 @@ export const lmstudioProvider = {
       messages: options.messages ?? null,
       signal,
       onToken: options.onToken,
+      tools: options.tools ?? null,
     });
   },
 };

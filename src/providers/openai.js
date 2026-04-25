@@ -17,6 +17,8 @@ export const openaiProvider = {
   source: "cli",
   binary: "codex",
   defaultModel: "gpt-5.4",
+  // Shells out to the codex CLI — no direct HTTP API, native tool calling unavailable.
+  capabilities: { toolCalling: false },
 
   async fetchModels() {
     const { stdout } = await execFileAsync("codex", ["debug", "models"]);

@@ -4,6 +4,7 @@ export const googleProvider = {
   source: "api",
   binary: "node",
   defaultModel: "gemini-2.5-pro",
+  capabilities: { toolCalling: true },
 
   getAuthRequirements(resolvedConfig) {
     return resolvedConfig.auth.google;
@@ -61,32 +62,49 @@ export const googleProvider = {
     let systemInstruction;
 
     if (options.messages?.length) {
-      // Convert OpenAI-format messages to Gemini format
+      // Convert multi-turn messages (including tool results) to Gemini format.
       const nonSystem = options.messages.filter((m) => m.role !== "system");
       const systemMsg = options.messages.find((m) => m.role === "system");
       if (systemMsg) {
         systemInstruction = { parts: [{ text: systemMsg.content }] };
       }
-      contents = nonSystem.map((m) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
-      }));
+      contents = nonSystem.map((m) => {
+        // Tool result message: { role: "tool", content: functionResponse }
+        if (m.role === "tool") {
+          return {
+            role: "user",
+            parts: [m.content],
+          };
+        }
+        // Assistant message with function calls
+        if (m.role === "assistant" && m.toolCalls?.length) {
+          return {
+            role: "model",
+            parts: m.toolCalls.map((tc) => ({ functionCall: { name: tc.name, args: tc.args } })),
+          };
+        }
+        return {
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content ?? "" }],
+        };
+      });
     } else {
-      const parts = [];
       if (resolvedConfig.promptStack?.text) {
         systemInstruction = { parts: [{ text: resolvedConfig.promptStack.text }] };
       }
-      parts.push({ text: prompt });
-      contents = [{ role: "user", parts }];
+      contents = [{ role: "user", parts: [{ text: prompt }] }];
     }
+
+    const requestBody = {
+      ...(systemInstruction ? { systemInstruction } : {}),
+      contents,
+      ...(options.tools ? { tools: [options.tools] } : {}),
+    };
 
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...(systemInstruction ? { systemInstruction } : {}),
-        contents,
-      }),
+      body: JSON.stringify(requestBody),
       signal,
     });
 
@@ -97,16 +115,23 @@ export const googleProvider = {
 
     if (!stream) {
       const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts
-        ?.map((part) => part.text ?? "")
-        .join("") ?? "";
-      return { text, usage: data.usageMetadata ?? null };
+      const parts = data.candidates?.[0]?.content?.parts ?? [];
+      const text = parts.map((p) => p.text ?? "").join("");
+      const toolCalls = parts
+        .filter((p) => p.functionCall)
+        .map((p, i) => ({
+          name: p.functionCall.name,
+          args: p.functionCall.args ?? {},
+          id: `gemini-call-${i}`,
+        }));
+      return { text, usage: data.usageMetadata ?? null, toolCalls };
     }
 
     const decoder = new TextDecoder();
     let buffer = "";
     let text = "";
     let usage = null;
+    const toolCalls = [];
 
     function readEvent(line) {
       const trimmed = line.trim();
@@ -116,12 +141,20 @@ export const googleProvider = {
       if (!payload) return;
 
       const event = JSON.parse(payload);
-      const token = event.candidates?.[0]?.content?.parts
-        ?.map((part) => part.text ?? "")
-        .join("") ?? "";
-      if (token) {
-        text += token;
-        options.onToken(token);
+      const parts = event.candidates?.[0]?.content?.parts ?? [];
+
+      for (const part of parts) {
+        if (part.text) {
+          text += part.text;
+          options.onToken(part.text);
+        }
+        if (part.functionCall) {
+          toolCalls.push({
+            name: part.functionCall.name,
+            args: part.functionCall.args ?? {},
+            id: `gemini-call-${toolCalls.length}`,
+          });
+        }
       }
       usage = event.usageMetadata ?? usage;
     }
@@ -146,6 +179,6 @@ export const googleProvider = {
       throw err;
     }
 
-    return { text, usage };
+    return { text, usage, toolCalls };
   },
 };

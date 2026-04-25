@@ -1,11 +1,44 @@
+# Dependencies
 node_modules/
-.DS_Store
-coverage/
+
+# Build outputs
 dist/
 build/
+coverage/
+.nyc_output/
+
+# Environment variables
 .env
 .env.*
+.env.local
+
+# Logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+.mrmush
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# AI assistants
 .claude/
 .codex/
-.mrmush
+
+# Terminal Bench
+jobs/
+integrations/
