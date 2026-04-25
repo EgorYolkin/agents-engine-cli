@@ -491,11 +491,20 @@ export function promptInput(
     }
 
     function handleResize() {
+      // Clear only the current input box using cursor tracking, so callers
+      // don't need a full-screen refresh (which would redraw the splash card).
+      const linesToGoUp = renderState.cursorUpLines;
+      resetRenderState(renderState);
+      if (linesToGoUp > 0) {
+        process.stdout.write(`\x1b[${linesToGoUp}A`);
+      }
+      process.stdout.write(`\r\x1b[J`);
+
       if (onResize) {
-        onResize(resetAndRerender);
+        onResize(rerender);
         return;
       }
-      resetAndRerender();
+      rerender();
     }
 
     function cleanup() {

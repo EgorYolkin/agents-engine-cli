@@ -7,6 +7,7 @@ export const PROVIDER_IDS = [
   "deepseek",
   "ollama",
   "lmstudio",
+  "modelscope",
 ];
 export const PROFILE_IDS = ["default"];
 export const THINKING_LEVELS = [
@@ -95,6 +96,13 @@ const authSchema = z
       .object({
         mode: z.enum(["env"]).default("env"),
         env_key: z.string().min(1).default("DEEPSEEK_API_KEY"),
+        api_key: z.string().min(1).optional(),
+      })
+      .default({}),
+    modelscope: z
+      .object({
+        mode: z.enum(["env"]).default("env"),
+        env_key: z.string().min(1).default("MODELSCOPE_API_KEY"),
         api_key: z.string().min(1).optional(),
       })
       .default({}),
@@ -230,6 +238,7 @@ export const userConfigSchema = z
         deepseek: providerSettingsSchema.default({}),
         ollama: providerSettingsSchema.default({}),
         lmstudio: providerSettingsSchema.default({}),
+        modelscope: providerSettingsSchema.default({}),
       })
       .default({}),
     prompts: promptLayerPathsSchema.default({}),
@@ -305,6 +314,7 @@ export const builtInConfig = Object.freeze(
       anthropic: { mode: "cli", env_key: "ANTHROPIC_API_KEY" },
       google: { mode: "env", env_key: "GEMINI_API_KEY" },
       deepseek: { mode: "env", env_key: "DEEPSEEK_API_KEY" },
+      modelscope: { mode: "env", env_key: "MODELSCOPE_API_KEY" },
     },
     providers: {
       openai: { model: "gpt-5.4", reasoning_effort: "medium", enabled: true },

@@ -596,7 +596,7 @@ export async function runChatScreen(context) {
     pendingLine = "",
     streamingText = "",
     renderInput = null,
-    fullRefresh = false,
+    fullRefresh = true,
   } = {}) {
     if (fullRefresh) {
       process.stdout.write("\x1b[?25l\x1b[H\x1b[J");

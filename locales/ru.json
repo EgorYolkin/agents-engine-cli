@@ -19,6 +19,10 @@
       "label": "DeepSeek API",
       "missingEnv": "Не задана переменная {envKey}"
     },
+    "modelscope": {
+      "label": "ModelScope API",
+      "missingEnv": "Не задана переменная {envKey}"
+    },
     "missingEnvSuffix": "env: {envKey}",
     "notInstalledSuffix": "не установлен"
   },
