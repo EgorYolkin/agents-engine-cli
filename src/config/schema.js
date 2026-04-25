@@ -206,6 +206,8 @@ const mcpServerSchema = z
     transport: z.enum(["stdio", "http"]).default("stdio"),
     command: z.string().min(1).optional(),
     args: z.array(z.string()).default([]),
+    cwd: z.string().min(1).optional(),
+    startup_timeout_sec: z.number().int().positive().optional(),
     url: z.string().url().optional(),
     env: z.record(z.string(), z.string()).default({}),
   })

@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { DOT_CHOICES } from "../../commands/index.js";
+import { DOT_CHOICES } from "../symbols.js";
 import { activeTheme, color } from "./theme.js";
 
 // ─── Pending / thinking animation ─────────────────────────────────────────────

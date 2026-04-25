@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { getSuggestions } from "../commands/index.js";
+import { getSuggestions, getUsageHint } from "../commands/index.js";
 
 const FILE_SUGGESTION_LIMIT = 50;
 const FILE_WALK_SKIP = new Set([
@@ -17,17 +17,36 @@ const FILE_WALK_SKIP = new Set([
 
 function frameWidth() {
   const columns = process.stdout.columns || 96;
-  return Math.max(6, columns - 1);
+  return Math.max(6, columns - 4);
 }
 
 function createRenderState() {
-  return { cursorUpLines: 0, blockHeight: 0 };
+  return { cursorUpLines: 0, blockHeight: 0, renderedWidth: 0 };
 }
 
 function resetRenderState(state) {
   if (!state) return;
   state.cursorUpLines = 0;
   state.blockHeight = 0;
+  state.renderedWidth = 0;
+}
+
+function wrappedRows(width, columns = process.stdout.columns || 96) {
+  return Math.max(1, Math.ceil(Math.max(1, width) / Math.max(1, columns)));
+}
+
+function cursorUpLinesForCurrentTerminal(state) {
+  if (!state?.cursorUpLines) return 0;
+  const oldRowHeight = wrappedRows(state.renderedWidth);
+  return state.cursorUpLines * oldRowHeight;
+}
+
+function clearRenderedState(state) {
+  const linesToGoUp = cursorUpLinesForCurrentTerminal(state);
+  if (linesToGoUp > 0) {
+    process.stdout.write(`\x1b[${linesToGoUp}A`);
+  }
+  process.stdout.write("\r\x1b[J");
 }
 
 function fitLine(value, width) {
@@ -252,19 +271,17 @@ function renderStatusbar(status, width) {
     .slice(0, Math.max(0, width));
 }
 
-export function renderInputBox(buffer, suggestions = [], selectedIdx = 0, theme = {}, state = createRenderState(), status = null, cursorIndex = buffer.length) {
-  const frame = buildInputFrame(buffer, suggestions, selectedIdx, theme, status, cursorIndex);
-  if (state.cursorUpLines > 0) {
-    process.stdout.write(`\x1b[${state.cursorUpLines}A`);
-  }
-  process.stdout.write("\r\x1b[J");
+export function renderInputBox(buffer, suggestions = [], selectedIdx = 0, theme = {}, state = createRenderState(), status = null, cursorIndex = buffer.length, usageHint = null) {
+  const frame = buildInputFrame(buffer, suggestions, selectedIdx, theme, status, cursorIndex, usageHint);
+  clearRenderedState(state);
   process.stdout.write(frame.text);
   state.cursorUpLines = frame.cursorUpLines;
   state.blockHeight = frame.blockHeight;
+  state.renderedWidth = frame.width;
   return state;
 }
 
-function buildInputFrame(buffer, suggestions = [], selectedIdx = 0, theme = {}, status = null, cursorIndex = buffer.length) {
+function buildInputFrame(buffer, suggestions = [], selectedIdx = 0, theme = {}, status = null, cursorIndex = buffer.length, usageHint = null) {
   const bufferLines = buffer.split("\n");
   const cursor = getCursorLocation(buffer, cursorIndex);
   const activeSuggestions = bufferLines.length === 1 ? suggestions : [];
@@ -332,8 +349,20 @@ function buildInputFrame(buffer, suggestions = [], selectedIdx = 0, theme = {}, 
       visualLine.sourceLineIndex === 0 && visualLine.visualRowIndex === 0
         ? `${borderColor(vertical)} ${padding}${promptColor(prompt)} `
         : `${borderColor(vertical)} ${padding}${muted("  ")}`;
-    const content = fitLine(visualLine.text, contentWidth);
-    const line = prefix + content;
+    const isFirstVisualLine =
+      visualLine.sourceLineIndex === 0 && visualLine.visualRowIndex === 0;
+    const rawContent =
+      isFirstVisualLine && usageHint?.text
+        ? `${visualLine.text}${usageHint.text}`
+        : visualLine.text;
+    const content = fitLine(rawContent, contentWidth);
+    const visibleText = isFirstVisualLine && usageHint?.text
+      ? content.slice(0, Math.min(visualLine.text.length, content.length))
+      : content;
+    const hintText = isFirstVisualLine && usageHint?.text
+      ? content.slice(visibleText.length)
+      : "";
+    const line = prefix + visibleText + (hintText ? chalk.dim(hintText) : "");
     const plainLength = plainPrefixLength + content.length;
     parts.push(line + " ".repeat(Math.max(0, width - 1 - plainLength)) + borderColor(vertical));
   }
@@ -395,14 +424,12 @@ function buildInputFrame(buffer, suggestions = [], selectedIdx = 0, theme = {}, 
     text: parts.join(""),
     cursorUpLines: cursorVisualLineIndex + 1,
     blockHeight: 1 + visualLines.length + suggestionCount + extraSummaryLine + 1 + statusLineCount,
+    width,
   };
 }
 
 export function clearRenderedInputBox(state) {
-  if (state?.cursorUpLines > 0) {
-    process.stdout.write(`\x1b[${state.cursorUpLines}A`);
-  }
-  process.stdout.write("\r\x1b[J");
+  clearRenderedState(state);
   resetRenderState(state);
 }
 
@@ -437,7 +464,16 @@ export function promptInput(
     let fileIndex = [];
 
     function rerender() {
-      renderInputBox(buffer, suggestions, selectedIdx, theme, renderState, status, cursorIndex);
+      renderInputBox(
+        buffer,
+        suggestions,
+        selectedIdx,
+        theme,
+        renderState,
+        status,
+        cursorIndex,
+        getUsageHint(buffer),
+      );
     }
 
     function updateSuggestions() {
@@ -491,14 +527,10 @@ export function promptInput(
     }
 
     function handleResize() {
-      // Clear only the current input box using cursor tracking, so callers
-      // don't need a full-screen refresh (which would redraw the splash card).
-      const linesToGoUp = renderState.cursorUpLines;
+      // The terminal may wrap the previously rendered frame after a resize.
+      // Clear using the previous frame width before rendering the new width.
+      clearRenderedState(renderState);
       resetRenderState(renderState);
-      if (linesToGoUp > 0) {
-        process.stdout.write(`\x1b[${linesToGoUp}A`);
-      }
-      process.stdout.write(`\r\x1b[J`);
 
       if (onResize) {
         onResize(rerender);

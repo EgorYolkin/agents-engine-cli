@@ -4,7 +4,8 @@ import path from "node:path";
 import chalk from "chalk";
 import { getProvider } from "../../providers/index.js";
 import { createPassiveInputBuffer, promptInput } from "../input.js";
-import { DOT_CHOICES, executeCommand } from "../../commands/index.js";
+import { executeCommand } from "../../commands/index.js";
+import { DOT_CHOICES } from "../symbols.js";
 import { loadConfig, saveState } from "../../config/loader.js";
 import {
   buildRepoMapAnswerForPrompt,
@@ -14,7 +15,7 @@ import { createTaskActor, waitForTaskActor } from "../../orchestrator/index.js";
 import { runProviderWithTools } from "../../tools/orchestrator.js";
 import { createSession, recordMessage } from "../../history/session.js";
 import { formatDuration, formatTokenCount } from "../../history/metrics.js";
-import { printMushCard } from "../mush-card.js";
+import { buildMushCardFrame } from "../mush-card.js";
 import { INLINE_TERMINAL_MODE } from "../components/terminal.js";
 import { activeTheme, color } from "../components/theme.js";
 import { frameWidth, fitText } from "../components/layout.js";
@@ -129,7 +130,7 @@ function inputStatus(context, tokens, { animateSessionTokens = false } = {}) {
   };
 }
 
-function splash(context) {
+function buildSplashFrame(context) {
   const model = context.runtimeOverrides.model ?? context.config.activeModel;
   const level =
     context.runtimeOverrides.thinkingLevel ??
@@ -144,10 +145,11 @@ function splash(context) {
   const muted = color(theme, "muted", chalk.dim);
   const appVersion = context.appVersion ?? "–";
 
-  printMushCard(context, [
-    { text: `${dot}  ${provider}/${model} ( ${level} effort )`, paint: muted },
-    { text: `${dot}  ${cwd}`, paint: muted },
-    { text: `${dot}  v${appVersion}`, paint: muted },
+  return buildMushCardFrame(context, [
+    { text: `  ${dot}  ${provider}/${model}`, paint: muted },
+    { text: `  ${dot}  ${level} effort`, paint: muted },
+    { text: `  ${dot}  ${cwd}`, paint: muted },
+    { text: ` ${dot}  v${appVersion}`, paint: muted },
   ]);
 }
 
@@ -447,6 +449,8 @@ export async function runChatScreen(context) {
   let debugStepCounter = 0;
   let resetLiveRegionState = () => {};
   let renderedTranscriptEntries = 0;
+  let splashFrame = null;
+  let splashVisible = false;
 
   context.chatSessionOrchestrator = {
     errors: context.chatSessionOrchestrator?.errors ?? 0,
@@ -577,7 +581,9 @@ export async function runChatScreen(context) {
   function setupViewport() {
     process.stdout.write(INLINE_TERMINAL_MODE);
     process.stdout.write("\n");
-    splash(context);
+    splashFrame = buildSplashFrame(context);
+    splashVisible = true;
+    process.stdout.write(splashFrame.text);
   }
 
   function renderTranscriptEntry(entry) {
@@ -600,8 +606,11 @@ export async function runChatScreen(context) {
   } = {}) {
     if (fullRefresh) {
       process.stdout.write("\x1b[?25l\x1b[H\x1b[J");
-      process.stdout.write("\n");
-      splash(context);
+      if (splashVisible) {
+        process.stdout.write("\n");
+        splashFrame = buildSplashFrame(context);
+        process.stdout.write(splashFrame.text);
+      }
       renderedTranscriptEntries = 0;
     }
 
@@ -634,7 +643,6 @@ export async function runChatScreen(context) {
   }
 
   setupViewport();
-  redrawScreen();
 
   try {
     while (true) {
@@ -652,7 +660,7 @@ export async function runChatScreen(context) {
             activeTheme(context),
             queuedInput,
             inputStatus(context, lastTokens, { animateSessionTokens: true }),
-            (renderInput) => redrawScreen({ renderInput }),
+            null,
             [...transcript]
               .filter((e) => e.role === "user")
               .map((e) => e.text)
@@ -952,16 +960,12 @@ export async function runChatScreen(context) {
 
       resizeHandler = () => {
         if (shouldStream && activeBlockMode === "stream" && streamedText) {
-          redrawScreen();
           renderStreamingState();
           return;
         }
         if (activeBlockMode === "pending") {
-          redrawScreen();
           renderPendingState();
-          return;
         }
-        redrawScreen();
       };
 
       let response;
