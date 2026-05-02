@@ -2,9 +2,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
-import { getRepoMapResult } from "../intelligence/index.js";
+import { aggregateContext } from "../context/aggregator.js";
 import {
   builtInConfig,
   DEFAULT_STATUSBAR_TEMPLATE,
@@ -12,11 +11,6 @@ import {
   LEGACY_STATUSBAR_TEMPLATE,
   userConfigSchema,
 } from "./schema.js";
-
-const TOOLS_FILE_OPS_PROMPT_URL = new URL(
-  "../prompts/tools-file-ops.md",
-  import.meta.url,
-);
 
 const APP_DIR_NAME = ".mrmush";
 const CONFIG_FILE_NAME = "config.toml";
@@ -66,6 +60,7 @@ const DEFAULT_PROVIDER_PROMPTS = {
   anthropic: "Provider guidance: prefer Claude CLI compatible instructions.",
   google: "Provider guidance: prefer Gemini compatible instructions.",
   deepseek: "Provider guidance: prefer DeepSeek API compatible instructions.",
+  xiaomimimo: "Provider guidance: prefer XiaomiMiMo OpenAI-compatible instructions.",
 };
 
 function mergeObjects(base, override) {
@@ -175,15 +170,6 @@ async function readTomlFile(filePath) {
   return result.data;
 }
 
-async function maybeReadText(filePath) {
-  if (!(await fileExists(filePath))) return null;
-  return fs.readFile(filePath, "utf8");
-}
-
-async function readBundledText(fileUrl) {
-  return fs.readFile(fileUrl, "utf8");
-}
-
 async function ensurePromptFile(
   filePath,
   expectedContent,
@@ -198,19 +184,6 @@ async function ensurePromptFile(
   const currentContent = await fs.readFile(filePath, "utf8");
   if (legacyContent && currentContent.trim() === legacyContent.trim()) {
     await fs.writeFile(filePath, nextContent, "utf8");
-  }
-}
-
-async function findProjectFileUpwards(startDir, fileName, homeDir = os.homedir()) {
-  const boundary = path.resolve(homeDir);
-  let currentDir = path.resolve(startDir);
-  while (true) {
-    const candidate = path.join(currentDir, fileName);
-    if (await fileExists(candidate)) return candidate;
-    const parentDir = path.dirname(currentDir);
-    // Stop at filesystem root or home directory boundary.
-    if (parentDir === currentDir || currentDir === boundary) return null;
-    currentDir = parentDir;
   }
 }
 
@@ -428,79 +401,8 @@ export async function loadState(paths = getAppPaths()) {
   }
 }
 
-export async function resolvePromptStack(resolvedConfig, cwd = process.cwd()) {
-  const { paths } = resolvedConfig;
-  const profile = resolvedConfig.activeProfile;
-  const providerId = resolvedConfig.activeProvider;
-  const bashEnabled =
-    resolvedConfig.tools?.bash?.enabled ?? builtInConfig.tools.bash.enabled;
-  const repoMapEnabled =
-    resolvedConfig.intelligence?.repo_map?.enabled ??
-    builtInConfig.intelligence.repo_map.enabled;
-  const agentsEngineFile = await findProjectFileUpwards(cwd, "MRMUSH.md");
-  const agentsFile = await findProjectFileUpwards(cwd, "AGENTS.md");
-  const repoMapResult = repoMapEnabled
-    ? await getRepoMapResult(cwd, {
-        mode: resolvedConfig.intelligence?.repo_map?.mode,
-        tokenBudget: resolvedConfig.intelligence?.repo_map?.token_budget,
-        maxSymbolsPerFile:
-          resolvedConfig.intelligence?.repo_map?.max_symbols_per_file,
-        includeInternalSymbols:
-          resolvedConfig.intelligence?.repo_map?.include_internal_symbols,
-        deniedPaths: resolvedConfig.intelligence?.repo_map?.denied_paths,
-      })
-    : { text: "", stats: null };
-  const layers = [
-    {
-      id: "project-mrmush",
-      source: agentsEngineFile,
-      content: agentsEngineFile ? await maybeReadText(agentsEngineFile) : null,
-    },
-    { id: "built-in", source: "built-in", content: DEFAULT_SYSTEM_PROMPT },
-    {
-      id: "global-system",
-      source: paths.systemPromptFile,
-      content: await maybeReadText(paths.systemPromptFile),
-    },
-    {
-      id: "profile",
-      source: paths.profilePromptFile(profile),
-      content: await maybeReadText(paths.profilePromptFile(profile)),
-    },
-    {
-      id: "provider",
-      source: paths.providerPromptFile(providerId),
-      content: await maybeReadText(paths.providerPromptFile(providerId)),
-    },
-    {
-      id: "project-agents",
-      source: agentsFile,
-      content: agentsFile ? await maybeReadText(agentsFile) : null,
-    },
-    {
-      id: "repo-map",
-      source: "repo-map",
-      content: repoMapResult.text,
-      meta: repoMapResult.stats,
-    },
-    {
-      id: "tools-file-ops",
-      source: fileURLToPath(TOOLS_FILE_OPS_PROMPT_URL),
-      content: bashEnabled
-        ? await readBundledText(TOOLS_FILE_OPS_PROMPT_URL)
-        : null,
-    },
-    {
-      id: "project-system",
-      source: paths.projectPromptFile,
-      content: await maybeReadText(paths.projectPromptFile),
-    },
-  ].filter((layer) => layer.content && layer.content.trim().length > 0);
-
-  return {
-    layers,
-    text: layers.map((layer) => layer.content.trim()).join("\n\n"),
-  };
+export async function resolvePromptStack(resolvedConfig, cwd = process.cwd(), intent = null) {
+  return aggregateContext({ config: resolvedConfig, cwd, intent });
 }
 
 export async function loadConfig({
@@ -518,6 +420,11 @@ export async function loadConfig({
     paths.systemPromptFile,
     DEFAULT_SYSTEM_PROMPT,
     LEGACY_DEFAULT_SYSTEM_PROMPT,
+  );
+  await Promise.all(
+    Object.entries(DEFAULT_PROVIDER_PROMPTS).map(async ([providerId, text]) => {
+      await ensurePromptFile(paths.providerPromptFile(providerId), text);
+    }),
   );
   const globalConfig = (await readTomlFile(paths.configFile)) ?? {};
   const projectConfig = (await readTomlFile(paths.projectConfigFile)) ?? {};

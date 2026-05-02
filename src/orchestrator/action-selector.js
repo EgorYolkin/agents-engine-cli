@@ -66,6 +66,16 @@ function inferAction(prompt, domain) {
   }
 }
 
+/**
+ * Lightweight intent classification for context filtering.
+ * Returns just the domain string (e.g. "backend", "analysis", "general").
+ * @param {string} prompt
+ * @returns {string}
+ */
+export function classifyIntent(prompt) {
+  return classifyPrompt(prompt).domain;
+}
+
 export function classifyPrompt(prompt) {
   const normalizedPrompt = normalizePrompt(prompt);
   if (isTrivialGeneralPrompt(normalizedPrompt)) {

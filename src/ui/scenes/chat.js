@@ -13,6 +13,8 @@ import {
 } from "../../intelligence/index.js";
 import { createTaskActor, waitForTaskActor } from "../../orchestrator/index.js";
 import { runProviderWithTools } from "../../tools/orchestrator.js";
+import { compactTranscript, buildDroppedSummary } from "../../compactor/index.js";
+import { estimateTokens, estimateMessagesTokens } from "../../context/tokenizer.js";
 import { createSession, recordMessage } from "../../history/session.js";
 import { formatDuration, formatTokenCount } from "../../history/metrics.js";
 import { buildMushCardFrame } from "../mush-card.js";
@@ -98,7 +100,7 @@ function formatUsage(usage) {
   return formatTokenCount(extractOutputTokens(usage));
 }
 
-function inputStatus(context, tokens, { animateSessionTokens = false } = {}) {
+function inputStatus(context, tokens, { animateSessionTokens = false, generatedText = null } = {}) {
   const startedAt =
     context.currentSessionMeta?.createdAt ??
     context.currentSessionStartedAt ??
@@ -127,7 +129,67 @@ function inputStatus(context, tokens, { animateSessionTokens = false } = {}) {
     template:
       context.runtimeOverrides.config?.ui?.statusbar_prompt ??
       context.config.ui?.statusbar_prompt,
+    generatedText,
   };
+}
+
+/**
+ * Check whether a statusbar prompt is a template (contains {placeholder} tokens)
+ * or a natural language prompt meant for AI generation.
+ */
+function isStatusbarTemplate(prompt) {
+  return /\{[a-z_]+\}/.test(prompt);
+}
+
+/**
+ * Generate statusbar text by sending the user's natural language prompt to the model.
+ * Caches the result to avoid repeated calls on every keystroke.
+ */
+let _statusbarCache = { prompt: null, metrics: null, result: null };
+
+async function generateStatusbar(context, statusContext) {
+  const prompt =
+    context.runtimeOverrides.config?.ui?.statusbar_prompt ??
+    context.config.ui?.statusbar_prompt;
+  if (!prompt || isStatusbarTemplate(prompt)) return null;
+
+  const metrics = context.currentSessionMetrics;
+  const cacheKey = `${metrics?.messageCount ?? 0}_${metrics?.outputTokens ?? 0}`;
+  if (_statusbarCache.prompt === prompt && _statusbarCache.metrics === cacheKey) {
+    return _statusbarCache.result;
+  }
+
+  const providerId =
+    context.runtimeOverrides.providerId ?? context.config.activeProvider;
+  const provider = getProvider(providerId, context.i18n);
+
+  const generationPrompt = [
+    "Generate a single-line status bar for a CLI agent.",
+    `User request: ${prompt}`,
+    "",
+    "Current context:",
+    `- folder: ${statusContext.folder}`,
+    `- model: ${statusContext.model}`,
+    `- thinking: ${statusContext.thinking}`,
+    `- messages: ${statusContext.messages}`,
+    `- session tokens out: ${statusContext.sessionTokens}`,
+    `- session time: ${statusContext.sessionTime}`,
+    "",
+    "Reply with ONLY the status bar text, no quotes, no explanation. Keep it under 120 characters.",
+  ].join("\n");
+
+  try {
+    const response = await provider.exec(
+      context.config,
+      generationPrompt,
+      context.runtimeOverrides,
+    );
+    const text = (response.text ?? "").trim().split("\n")[0].slice(0, 200);
+    _statusbarCache = { prompt, metrics: cacheKey, result: text };
+    return text;
+  } catch {
+    return _statusbarCache.result;
+  }
 }
 
 function buildSplashFrame(context) {
@@ -192,7 +254,7 @@ function buildReplayAssistantMessage(entry, providerId) {
   if (entry.meta?.kind) return null;
 
   const payload = entry.assistantPayload ?? null;
-  if (providerId === "deepseek" && payload) {
+  if ((providerId === "deepseek" || providerId === "xiaomimimo") && payload) {
     return {
       role: "assistant",
       content: payload.content ?? entry.text ?? "",
@@ -219,7 +281,17 @@ export function buildMessagesFromTranscript(
   if (promptStack?.text) {
     messages.push({ role: "system", content: promptStack.text });
   }
-  for (const entry of transcript) {
+
+  const { recent, dropped } = compactTranscript(transcript);
+  if (dropped.length > 0) {
+    const summary = buildDroppedSummary(dropped);
+    if (summary) {
+      messages.push({ role: "user", content: `[Previous context summary]\n${summary}` });
+      messages.push({ role: "assistant", content: "Understood. I have the context from our earlier conversation." });
+    }
+  }
+
+  for (const entry of recent) {
     if (entry.role === "user") {
       messages.push({ role: "user", content: entry.text });
       continue;
@@ -277,6 +349,8 @@ async function buildPromptWithFileMentions(text, context) {
 
   const maxBytes =
     Math.max(1, context.config.tools?.files?.max_file_size_kb ?? 512) * 1024;
+  const tokenBudget = context.config.intelligence?.context_budget ?? 8000;
+  let usedTokens = 0;
   const fileBlocks = [];
 
   for (const mention of mentions) {
@@ -293,8 +367,15 @@ async function buildPromptWithFileMentions(text, context) {
       continue;
     }
 
-    const truncated = Buffer.byteLength(content, "utf8") > maxBytes;
-    const visibleContent = truncated ? content.slice(0, maxBytes) : content;
+    let truncated = Buffer.byteLength(content, "utf8") > maxBytes;
+    let visibleContent = truncated ? content.slice(0, maxBytes) : content;
+    const contentTokens = estimateTokens(visibleContent);
+    if (usedTokens + contentTokens > tokenBudget) {
+      const remainingChars = Math.max(0, (tokenBudget - usedTokens) * 4);
+      visibleContent = visibleContent.slice(0, remainingChars);
+      truncated = true;
+    }
+    usedTokens += estimateTokens(visibleContent);
     fileBlocks.push(
       [
         `File: ${mention}${truncated ? " (truncated)" : ""}`,
@@ -705,12 +786,17 @@ export async function runChatScreen(context) {
 
       let text;
       try {
+        const statusForInput = inputStatus(context, lastTokens, { animateSessionTokens: true });
+        const generatedStatusbar = await generateStatusbar(context, statusForInput);
+        if (generatedStatusbar) {
+          statusForInput.generatedText = generatedStatusbar;
+        }
         text = (
           await promptInput(
             i18n,
             activeTheme(context),
             queuedInput,
-            inputStatus(context, lastTokens, { animateSessionTokens: true }),
+            statusForInput,
             (rerenderInput) => {
               // On terminal resize: full screen redraw followed by input re-render.
               // This prevents ghost lines from terminal line-reflow.
@@ -1058,7 +1144,7 @@ export async function runChatScreen(context) {
       try {
         passiveInput = createPassiveInputBuffer(i18n, activeTheme(context), {
           onEscape: () => abort.abort(),
-          status: inputStatus(context, lastTokens),
+          status: inputStatus(context, lastTokens, { generatedText: _statusbarCache.result }),
           autoResize: false,
           externalRender: true,
           onChange: () => {
@@ -1085,6 +1171,15 @@ export async function runChatScreen(context) {
         if (context.runtimeOverrides.debug) {
           stopPendingAnimation();
           clearLiveRegion();
+          const systemTokens = estimateTokens(context.config.promptStack?.text ?? "");
+          const transcriptTokens = estimateMessagesTokens(messages);
+          const sourceIds = (context.config.promptStack?.layers ?? []).map(l => l.id).join(",");
+          appendDebugMessage(
+            `context: system=${systemTokens}t messages=${messages.length} est_total=${transcriptTokens}t budget=${context.config.intelligence?.context_budget ?? "n/a"}t`,
+          );
+          appendDebugMessage(
+            `context: sources=[${sourceIds}]`,
+          );
           appendDebugMessage(
             summarizeRepoMapLayer(context.config, context.config.promptStack),
           );

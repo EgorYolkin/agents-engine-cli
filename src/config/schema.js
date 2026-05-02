@@ -5,6 +5,7 @@ export const PROVIDER_IDS = [
   "anthropic",
   "google",
   "deepseek",
+  "xiaomimimo",
   "ollama",
   "lmstudio",
   "modelscope",
@@ -99,6 +100,13 @@ const authSchema = z
         api_key: z.string().min(1).optional(),
       })
       .default({}),
+    xiaomimimo: z
+      .object({
+        mode: z.enum(["env"]).default("env"),
+        env_key: z.string().min(1).default("XIAOMIMIMO_API_KEY"),
+        api_key: z.string().min(1).optional(),
+      })
+      .default({}),
     modelscope: z
       .object({
         mode: z.enum(["env"]).default("env"),
@@ -152,6 +160,7 @@ const intelligenceSchema = z
           ]),
       })
       .default({}),
+    context_budget: z.number().int().positive().default(8000),
   })
   .strict();
 
@@ -238,6 +247,7 @@ export const userConfigSchema = z
         anthropic: providerSettingsSchema.default({}),
         google: providerSettingsSchema.default({}),
         deepseek: providerSettingsSchema.default({}),
+        xiaomimimo: providerSettingsSchema.default({}),
         ollama: providerSettingsSchema.default({}),
         lmstudio: providerSettingsSchema.default({}),
         modelscope: providerSettingsSchema.default({}),
@@ -279,6 +289,7 @@ export const builtInConfig = Object.freeze(
           "build",
         ],
       },
+      context_budget: 8000,
     },
     tools: {
       bash: {
@@ -326,6 +337,7 @@ export const builtInConfig = Object.freeze(
       anthropic: { mode: "cli", env_key: "ANTHROPIC_API_KEY" },
       google: { mode: "env", env_key: "GEMINI_API_KEY" },
       deepseek: { mode: "env", env_key: "DEEPSEEK_API_KEY" },
+      xiaomimimo: { mode: "env", env_key: "XIAOMIMIMO_API_KEY" },
       modelscope: { mode: "env", env_key: "MODELSCOPE_API_KEY" },
     },
     providers: {
@@ -342,6 +354,11 @@ export const builtInConfig = Object.freeze(
       },
       deepseek: {
         model: "deepseek-chat",
+        reasoning_effort: "medium",
+        enabled: false,
+      },
+      xiaomimimo: {
+        model: "deepseek-v4-flash",
         reasoning_effort: "medium",
         enabled: false,
       },
