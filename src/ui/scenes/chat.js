@@ -690,7 +690,7 @@ export async function runChatScreen(context) {
     renderedTranscriptEntries = transcript.length;
   }
 
-  function flushToolEvents() {
+  function flushToolEvents({ onTerminalEvent = null } = {}) {
     if (pendingToolEvents.length === 0) return;
     const events = pendingToolEvents.splice(0);
 
@@ -728,10 +728,12 @@ export async function runChatScreen(context) {
     renderedTranscriptEntries = transcript.length;
 
     // Enable expansion for any terminal_event entries in the batch
-    for (const ev of events) {
-      if (ev.meta?.kind === "terminal_event") {
-        enableTerminalExpansion(transcript.at(-1));
-        break;
+    if (onTerminalEvent) {
+      for (const ev of events) {
+        if (ev.meta?.kind === "terminal_event") {
+          onTerminalEvent(transcript.at(-1));
+          break;
+        }
       }
     }
   }
@@ -830,6 +832,9 @@ export async function runChatScreen(context) {
       printExpandableTerminalEventMessage(entry, context);
     } else if (entry.meta?.kind === "tool_event") {
       printToolEventMessage(entry.meta.title ?? "tool", entry.text, context);
+    } else if (entry.meta?.kind === "tool_batch") {
+      // Already printed by flushToolEvents() — skip re-rendering
+      return;
     } else {
       printAiMessage(entry.text, context);
     }
@@ -1438,7 +1443,7 @@ export async function runChatScreen(context) {
             }
           },
           onAssistantToolIntent: async ({ assistantText, assistantMessage }) => {
-            flushToolEvents();
+            flushToolEvents({ onTerminalEvent: enableTerminalExpansion });
 
             const toolCalls = assistantMessage?.tool_calls ?? [];
             const hasApprovalTools = toolCalls.some((tc) => {
@@ -1689,7 +1694,7 @@ export async function runChatScreen(context) {
       const assistantText = shouldStream
         ? (response.text || streamedText)
         : response.text;
-      flushToolEvents();
+      flushToolEvents({ onTerminalEvent: enableTerminalExpansion });
       if (assistantText) {
         appendAssistantMessage(
           assistantText,
