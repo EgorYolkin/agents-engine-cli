@@ -27,17 +27,7 @@ export const mcpCommand = {
   descriptionKey: "commands.descriptions.mcp",
   usage: "/mcp",
   async execute({ context, config }) {
-    const rawMcpServers = getEnabledMcpServers(config).map(formatMcpServer);
-
-    const mcpServers = rawMcpServers.map((server) => ({
-      title: server.id,
-      detail: server.startup_timeout_sec
-        ? `${server.transport}, ${server.startup_timeout_sec}s`
-        : server.transport,
-      description: [server.command, ...(server.args ?? []), server.cwd]
-        .filter(Boolean)
-        .join(" · "),
-    }));
+    const mcpServers = getEnabledMcpServers(config).map(formatMcpServer);
 
     renderMcpServersCard(
       buildChatListFrame("mcp", mcpServers, context, {

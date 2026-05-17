@@ -3,8 +3,10 @@ import { requestBashApproval, requestWriteApproval } from "./approval-ui.js";
 import { runBashCommand } from "./bash.js";
 import { evaluateWritePolicy, readExistingFile, writeFile } from "./file-write.js";
 import { formatToolResultForModel, parseToolCall } from "./parser.js";
-import { evaluateBashPolicy } from "./policy.js";
+import { evaluateBashPolicy, isReadOnlyBashCommand } from "./policy.js";
 import { runWithNativeTools } from "./native-loop.js";
+import { isMcpTool } from "./definitions.js";
+import { callMcpTool } from "../mcp/client.js";
 
 function toolErrorResult(call, message) {
   if (call?.name === "write_file") {
@@ -74,7 +76,8 @@ export async function executeToolCall(call, toolConfig, context, callbacks = {})
     if (!policy.ok) {
       return toolErrorResult(call, policy.error);
     }
-    const approved = await isCommandApproved(context.cwd, cmd);
+    const readOnly = bashToolConfig.auto_approve_readonly !== false && isReadOnlyBashCommand(cmd);
+    const approved = readOnly || await isCommandApproved(context.cwd, cmd);
     if (!approved && beforeApproval) beforeApproval();
     const approval = approved ? "always" : await requestBashApproval(cmd);
     if (!approved && afterApproval) afterApproval();
@@ -112,6 +115,23 @@ export async function executeToolCall(call, toolConfig, context, callbacks = {})
       return toolErrorResult(call, "User rejected write");
     }
     return writeFile({ ...call.args, cwd: context.cwd });
+  }
+
+  // MCP tool dispatch
+  if (isMcpTool(call.name)) {
+    const registry = context.mcpRegistry;
+    if (!registry) {
+      return toolErrorResult(call, "MCP registry not available");
+    }
+    const match = registry.getClientForTool(call.name);
+    if (!match) {
+      return toolErrorResult(call, `MCP tool not available: ${call.name}`);
+    }
+    try {
+      return await callMcpTool(match.client, match.entry.originalName, call.args);
+    } catch (err) {
+      return toolErrorResult(call, `MCP tool error: ${err.message ?? String(err)}`);
+    }
   }
 
   return toolErrorResult(call, `Unsupported tool: ${call.name}`);

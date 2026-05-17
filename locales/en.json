@@ -23,6 +23,10 @@
       "label": "ModelScope API",
       "missingEnv": "Environment variable {envKey} is not set"
     },
+    "xiaomimimo": {
+      "label": "Xiaomi MiMo",
+      "missingEnv": "Environment variable {envKey} is not set"
+    },
     "missingEnvSuffix": "env: {envKey}",
     "notInstalledSuffix": "not installed"
   },
@@ -101,6 +105,8 @@
       "usage": "Show total usage metrics",
       "mcp": "Show active MCP servers",
       "update": "Check for Mr. Mush updates",
+      "fork": "Fork current session into a new one",
+      "new": "Start a new session",
       "debug": "Toggle debug mode",
       "statusbar": "Configure status bar",
       "dot": "Choose message marker",
@@ -148,6 +154,8 @@
       "promptEdited": "prompt edited: {layer}",
       "promptReset": "prompt reset: {layer}",
       "promptHeader": "# {layer}",
+      "sessionStarted": "new session started",
+      "sessionForked": "session forked — history copied to new session",
       "sessionResumed": "session loaded: {title}",
       "themeInitialized": "theme initialized: {path}",
       "onboardCompleted": "onboarding completed: {providerId}/{model}, router: {routerProviderId}"

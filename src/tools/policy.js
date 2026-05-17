@@ -76,6 +76,11 @@ function isReadOnlySegment(argv) {
     );
   }
 
+  if (base === "find") {
+    // `find` with -exec/-execdir can execute arbitrary commands.
+    return !argv.some((arg) => arg === "-exec" || arg === "-execdir");
+  }
+
   return READ_ONLY_COMMANDS.has(base);
 }
 

@@ -11,7 +11,7 @@ import { renderMarkdown } from "./markdown.js";
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-function buildMessageLines(text, width) {
+export function buildMessageLines(text, width) {
   const lines = [];
 
   for (const rawLine of text.split("\n")) {
@@ -177,9 +177,11 @@ export function createTerminalEventMeta(toolCall, toolResult) {
 
     const cmdLine = `❯ ${toolCall.args.cmd}`;
     const fullLines = [cmdLine, ...outputLines];
-    const visibleOutputLines = outputLines.slice(0, 10);
+    const maxLineLen = 60;
+    const truncate = (line) => line.length > maxLineLen ? line.slice(0, maxLineLen - 3) + "..." : line;
+    const visibleOutputLines = outputLines.slice(0, 2).map(truncate);
     const collapsedLines = [cmdLine, ...visibleOutputLines];
-    const canExpand = outputLines.length >= 10;
+    const canExpand = outputLines.length > 2;
 
     return {
       kind: "terminal_event",
@@ -211,6 +213,30 @@ export function createTerminalEventMeta(toolCall, toolResult) {
       canExpand: false,
       expanded: false,
     };
+  }
+
+  if (toolCall.name?.startsWith("mcp__")) {
+    const parts = toolCall.name.split("__");
+    const serverId = parts[1] ?? "mcp";
+    const toolName = parts.slice(2).join("__") ?? toolCall.name;
+    const argsEntries = Object.entries(toolCall.args ?? {});
+    const argsLine = argsEntries.length > 0
+      ? argsEntries.map(([k, v]) => {
+          const val = typeof v === "string" ? v : JSON.stringify(v);
+          return `${k}=${val.length > 50 ? val.slice(0, 47) + "..." : val}`;
+        }).join(" ")
+      : "";
+    let resultSummary = "";
+    if (toolResult?.isError) { resultSummary = "error"; }
+    else {
+      let lineCount = 0;
+      for (const item of (toolResult?.content ?? [])) {
+        if (item.type === "text" && item.text) lineCount += item.text.split("\n").length;
+      }
+      resultSummary = `→ ${lineCount} lines`;
+    }
+    const detail = [argsLine, resultSummary].filter(Boolean).join("  ");
+    return { kind: "tool_event", title: `mcp:${serverId}:${toolName}`, text: detail };
   }
 
   return null;

@@ -1,22 +1,41 @@
-import { errorResult, successResult } from "../results.js";
+import { promptSearchSelect } from "../../ui/components/search-select.js";
+import { PROVIDERS, getProviderLabel } from "../../providers/index.js";
+import { errorResult, renderedResult, successResult } from "../results.js";
 
 export const providerCommand = {
   name: "provider",
   descriptionKey: "commands.descriptions.provider",
-  usage: "/provider use openai",
-  args: [{ value: "use", descriptionKey: "commands.args.use" }],
-  async execute({ args, context }) {
+  usage: "/provider",
+  async execute({ context }) {
     const { i18n } = context;
-    if (args[0] !== "use" || !args[1]) {
-      return errorResult(i18n.t("commands.errors.usageProviderUse"), i18n);
-    }
+
+    const currentProviderId =
+      context.runtimeOverrides.providerId ?? context.config.activeProvider;
+    const options = PROVIDERS.map((provider) => ({
+      value: provider.id,
+      label: getProviderLabel(provider, i18n),
+      description: provider.id === currentProviderId
+        ? "current"
+        : (provider.defaultModel ?? ""),
+    }));
+
+    const selected = await promptSearchSelect(
+      i18n.t("switch.prompts.target"),
+      options,
+      context.ui?.theme ?? {},
+      {
+        initialQuery: currentProviderId,
+      },
+    );
+
+    if (selected === null) return renderedResult();
 
     context.runtimeOverrides = {
       ...context.runtimeOverrides,
-      providerId: args[1],
+      providerId: selected,
     };
     return successResult(
-      i18n.t("commands.messages.providerSet", { providerId: args[1] }),
+      i18n.t("commands.messages.providerSet", { providerId: selected }),
     );
   },
 };

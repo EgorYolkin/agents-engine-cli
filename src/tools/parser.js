@@ -19,6 +19,9 @@ export function parseToolCall(text) {
   if (!parsed || typeof parsed !== "object") {
     return { ok: false, error: "Tool call must be a JSON object" };
   }
+  if (typeof parsed.name !== "string") {
+    return { ok: false, error: "Tool call name must be a string" };
+  }
   if (!parsed.args || typeof parsed.args !== "object") {
     return { ok: false, error: "Tool call args must be an object" };
   }
@@ -57,6 +60,19 @@ export function parseToolCall(text) {
           path: parsed.args.path.trim(),
           content: parsed.args.content,
         },
+      },
+      before,
+      after,
+    };
+  }
+
+  // MCP tools: mcp__<serverId>__<toolName>
+  if (parsed.name.startsWith("mcp__")) {
+    return {
+      ok: true,
+      call: {
+        name: parsed.name,
+        args: parsed.args,
       },
       before,
       after,

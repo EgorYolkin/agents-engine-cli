@@ -1,4 +1,4 @@
-import { TOOL_DEFINITIONS } from "./definitions.js";
+import { getAllToolDefinitions } from "./definitions.js";
 import { formatToolsOpenAI, normalizeToolCallOpenAI, formatToolResultOpenAI } from "./normalize.js";
 import { formatToolsGoogle, normalizeToolCallGoogle, formatToolResultGoogle } from "./normalize.js";
 
@@ -24,13 +24,15 @@ function buildInitialMessages(promptStack, prompt, messages) {
  * Format tool definitions for a specific provider.
  *
  * @param {string} providerId
+ * @param {object|null} registry - MCP registry instance
  * @returns {object}
  */
-function formatTools(providerId) {
+function formatTools(providerId, registry) {
+  const definitions = getAllToolDefinitions(registry);
   if (providerId === "google") {
-    return formatToolsGoogle(TOOL_DEFINITIONS);
+    return formatToolsGoogle(definitions);
   }
-  return formatToolsOpenAI(TOOL_DEFINITIONS);
+  return formatToolsOpenAI(definitions);
 }
 
 /**
@@ -133,7 +135,7 @@ export async function runWithNativeTools({
   executeToolCall,
 }) {
   const maxCalls = config.tools?.bash?.max_calls ?? 8;
-  const tools = formatTools(provider.id);
+  const tools = formatTools(provider.id, context.mcpRegistry ?? null);
   let currentMessages = buildInitialMessages(config.promptStack, prompt, messages);
   let lastResponse = null;
 

@@ -27,10 +27,12 @@ import {
   buildToolEventFrame,
   buildTerminalEventFrame,
   buildExpandableTerminalEventFrame,
+  buildMessageLines,
   createTerminalEventMeta,
   stripToolMarkup,
 } from "../components/frame.js";
 import { formatPendingLine } from "../components/pending.js";
+import { startMcpServers, stopMcpServers } from "../../mcp/lifecycle.js";
 
 // ─── Scene-level helpers ──────────────────────────────────────────────────────
 
@@ -213,6 +215,62 @@ function buildSplashFrame(context) {
     { text: `  ${dot}  ${cwd}`, paint: muted },
     { text: ` ${dot}  v${appVersion}`, paint: muted },
   ]);
+}
+
+function buildContextFrame(context, mcpRegistry) {
+  const theme = activeTheme(context);
+  const frame = theme.symbols?.frame ?? {};
+  const horizontal = frame.horizontal ?? "─";
+  const topLeft = frame.topLeft ?? "╭";
+  const bottomLeft = frame.bottomLeft ?? "╰";
+  const border = color(theme, "border", chalk.dim);
+  const muted = color(theme, "muted", chalk.dim);
+  const dot = context.config.ui?.message_dot ?? theme.symbols?.messageDot ?? "⬢";
+  const width = frameWidth();
+  const rows = [];
+  if (mcpRegistry) {
+    const connected = mcpRegistry.getAllServers().filter((s) => s.status === "connected");
+    if (connected.length > 0) rows.push(`  ${dot}  ${connected.length} MCP`);
+  }
+  if (rows.length === 0) return null;
+  const contentWidth = Math.max(1, width - 4);
+  const title = fitText(" CONTEXT", contentWidth);
+  const lines = [border(`${topLeft}${horizontal}`) + muted(title)];
+  for (const row of rows) lines.push(border("│") + muted(fitText(row, contentWidth)));
+  lines.push(border(`${bottomLeft}`));
+  return { text: `${lines.join("\n")}\n`, blockHeight: lines.length, cursorUpLines: lines.length };
+}
+
+function injectMcpToolsIntoPromptStack(context, registry) {
+  if (!registry || !registry.hasTools()) return;
+  const toolsByServer = {};
+  for (const t of registry.getAllTools()) {
+    if (!toolsByServer[t.serverId]) toolsByServer[t.serverId] = [];
+    toolsByServer[t.serverId].push(t);
+  }
+  const toolsList = Object.entries(toolsByServer)
+    .map(([serverId, tools]) => `[${serverId}]\n${tools.map((t) => `  - ${t.originalName}: ${t.description}`).join("\n")}`)
+    .join("\n\n");
+  const block = [
+    "",
+    "## MCP Tools",
+    "",
+    "You have external tools via MCP servers. Use them for documentation, API references, and library lookups.",
+    "",
+    toolsList,
+    "",
+    "Call MCP tools directly — they are available as function calls.",
+  ].join("\n");
+  if (context.config.promptStack) {
+    const baseText = (context.config.promptStack.text ?? "").replace(
+      /\n## MCP Tools[\s\S]*?(?=\n## |\n# |\n---|\n\n\n|$)/,
+      "",
+    );
+    context.config.promptStack = {
+      ...context.config.promptStack,
+      text: baseText + block,
+    };
+  }
 }
 
 // ─── Messages outside the main frame ──────────────────────────────────────────
@@ -563,6 +621,9 @@ export async function runChatScreen(context) {
   let renderedTranscriptEntries = 0;
   let splashFrame = null;
   let splashVisible = false;
+  let contextFrame = null;
+  let mcpRegistry = null;
+  let pendingToolEvents = [];
 
   context.chatSessionOrchestrator = {
     errors: context.chatSessionOrchestrator?.errors ?? 0,
@@ -627,6 +688,52 @@ export async function runChatScreen(context) {
     }
     printAiMessage(text, context);
     renderedTranscriptEntries = transcript.length;
+  }
+
+  function flushToolEvents() {
+    if (pendingToolEvents.length === 0) return;
+    const events = pendingToolEvents.splice(0);
+
+    // Build a compact combined block: one header, all events below.
+    const theme = activeTheme(context);
+    const symbol = resolveSymbol(context);
+    const accent = color(theme, "accent", chalk.magenta);
+    const muted = color(theme, "muted", chalk.dim);
+    const name = theme.layout?.agentName ?? "mr. mush";
+    const contentWidth = Math.max(1, (process.stdout.columns || 80) - 4);
+
+    const lines = [`${accent(`${symbol}\u00A0${name}`)}`];
+    for (const ev of events) {
+      const title = ev.meta?.title ?? ev.meta?.kind ?? "tool";
+      const bodyLines = buildMessageLines(ev.text, contentWidth);
+      if (ev.meta?.kind === "terminal_event") {
+        // Command + output
+        for (const bl of bodyLines) {
+          const trimmed = bl.trimStart();
+          if (trimmed.startsWith("❯ ")) {
+            lines.push(`  ${accent("❯")} ${chalk.white.bold(trimmed.slice(2))}`);
+          } else {
+            lines.push(muted(`  ${bl}`));
+          }
+        }
+      } else {
+        // MCP tool event — single line
+        lines.push(muted(`  ${title}  ${bodyLines[0] ?? ""}`));
+      }
+    }
+
+    const combined = `${lines.join("\n")}\n\n`;
+    transcript.push({ role: "assistant", text: combined, meta: { kind: "tool_batch" } });
+    process.stdout.write(combined);
+    renderedTranscriptEntries = transcript.length;
+
+    // Enable expansion for any terminal_event entries in the batch
+    for (const ev of events) {
+      if (ev.meta?.kind === "terminal_event") {
+        enableTerminalExpansion(transcript.at(-1));
+        break;
+      }
+    }
   }
 
   function appendEventMessage(text, meta) {
@@ -742,6 +849,7 @@ export async function runChatScreen(context) {
         process.stdout.write("\n");
         splashFrame = buildSplashFrame(context);
         process.stdout.write(splashFrame.text);
+        if (contextFrame) process.stdout.write(contextFrame.text);
       }
       renderedTranscriptEntries = 0;
     }
@@ -775,6 +883,34 @@ export async function runChatScreen(context) {
   }
 
   setupViewport();
+
+  // ─── Start MCP servers ────────────────────────────────────────────────────
+  try {
+    mcpRegistry = await startMcpServers(context.config, {
+      onStatus: (msg) => {
+        if (process.env.MRMUSH_DEBUG) {
+          process.stderr.write(`[mcp] ${msg}\n`);
+        }
+      },
+      onError: (id, err) => {
+        if (process.env.MRMUSH_DEBUG) {
+          process.stderr.write(`[mcp] server "${id}" error: ${err.message}\n`);
+        }
+      },
+    });
+    context.mcpRegistry = mcpRegistry;
+    injectMcpToolsIntoPromptStack(context, mcpRegistry);
+  } catch (err) {
+    if (process.env.MRMUSH_DEBUG) {
+      process.stderr.write(`[mcp] lifecycle error: ${err.message}\n`);
+    }
+  }
+
+  // Show MCP context block after splash
+  if (mcpRegistry && splashVisible) {
+    contextFrame = buildContextFrame(context, mcpRegistry);
+    if (contextFrame) process.stdout.write(contextFrame.text);
+  }
 
   try {
     while (true) {
@@ -847,6 +983,7 @@ export async function runChatScreen(context) {
           cwd: context.cwd,
           runtimeOverrides: context.runtimeOverrides,
         });
+        injectMcpToolsIntoPromptStack(context, mcpRegistry);
         if (context.resumedSession) {
           const resumed = context.resumedSession;
           context.resumedSession = null;
@@ -875,6 +1012,65 @@ export async function runChatScreen(context) {
                   : {}),
               })),
           );
+          redrawScreen({ fullRefresh: true });
+        } else if (context.newSessionRequested) {
+          context.newSessionRequested = false;
+          try {
+            const newProviderId = context.runtimeOverrides.providerId ?? context.config.activeProvider;
+            const newModel = context.runtimeOverrides.model ?? context.config.activeModel;
+            currentSession = await createSession(historyDir, { provider: newProviderId, model: newModel });
+            context.currentSession = currentSession;
+            context.currentSessionMeta = {
+              id: currentSession.id,
+              createdAt: new Date().toISOString(),
+              provider: newProviderId,
+              model: newModel,
+              messageCount: 0,
+              inputTokens: 0,
+              outputTokens: 0,
+              totalTokens: 0,
+            };
+            context.currentSessionStartedAt = context.currentSessionMeta.createdAt;
+          } catch {
+            // history unavailable — continue without persistence
+          }
+          context.currentSessionMetrics = {
+            messageCount: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            totalTokens: 0,
+          };
+          context.currentSessionDisplayedTokens = 0;
+          transcript.splice(0, transcript.length);
+          redrawScreen({ fullRefresh: true });
+        } else if (context.forkSessionRequested) {
+          context.forkSessionRequested = false;
+          try {
+            const forkProviderId = context.runtimeOverrides.providerId ?? context.config.activeProvider;
+            const forkModel = context.runtimeOverrides.model ?? context.config.activeModel;
+            currentSession = await createSession(historyDir, { provider: forkProviderId, model: forkModel });
+            context.currentSession = currentSession;
+            context.currentSessionMeta = {
+              id: currentSession.id,
+              createdAt: new Date().toISOString(),
+              provider: forkProviderId,
+              model: forkModel,
+              messageCount: transcript.length,
+              inputTokens: 0,
+              outputTokens: 0,
+              totalTokens: 0,
+            };
+            context.currentSessionStartedAt = context.currentSessionMeta.createdAt;
+          } catch {
+            // history unavailable — continue without persistence
+          }
+          context.currentSessionMetrics = {
+            messageCount: transcript.length,
+            inputTokens: context.currentSessionMetrics.inputTokens,
+            outputTokens: context.currentSessionMetrics.outputTokens,
+            totalTokens: context.currentSessionMetrics.totalTokens,
+          };
+          context.currentSessionDisplayedTokens = transcript.length;
           redrawScreen({ fullRefresh: true });
         } else {
           if (commandResult?.rendered) {
@@ -911,6 +1107,7 @@ export async function runChatScreen(context) {
         cwd: context.cwd,
         runtimeOverrides: context.runtimeOverrides,
       });
+      injectMcpToolsIntoPromptStack(context, mcpRegistry);
 
       if (
         context.chatSessionOrchestrator.openedAt &&
@@ -1231,7 +1428,6 @@ export async function runChatScreen(context) {
               queuedInput = passiveInput.stop();
               passiveInput = null;
             }
-            clearLiveRegion();
           },
           afterApproval: () => {
             startPendingAnimation();
@@ -1242,6 +1438,16 @@ export async function runChatScreen(context) {
             }
           },
           onAssistantToolIntent: async ({ assistantText, assistantMessage }) => {
+            flushToolEvents();
+
+            const toolCalls = assistantMessage?.tool_calls ?? [];
+            const hasApprovalTools = toolCalls.some((tc) => {
+              const name = tc.function?.name ?? tc.name ?? "";
+              return !name.startsWith("mcp__");
+            });
+            const isMcpOnly = !hasApprovalTools && toolCalls.length > 0;
+            if (isMcpOnly) return;
+
             stopPendingAnimation();
             if (streamRedrawTimer) {
               clearTimeout(streamRedrawTimer);
@@ -1280,17 +1486,11 @@ export async function runChatScreen(context) {
             streamedText = "";
           },
           onToolResult: async ({ toolCall, toolResult }) => {
-            stopPendingAnimation();
-            if (streamRedrawTimer) {
-              clearTimeout(streamRedrawTimer);
-              streamRedrawTimer = null;
-            }
-            clearLiveRegion();
             const meta = createTerminalEventMeta(toolCall, toolResult);
             if (meta?.text) {
-              appendAssistantMessage(meta.text, null, meta);
-              enableTerminalExpansion(transcript.at(-1));
+              pendingToolEvents.push({ text: meta.text, meta });
             }
+            startPendingAnimation();
           },
         };
         if (!response && context.config.orchestrator?.enabled) {
@@ -1489,6 +1689,7 @@ export async function runChatScreen(context) {
       const assistantText = shouldStream
         ? (response.text || streamedText)
         : response.text;
+      flushToolEvents();
       if (assistantText) {
         appendAssistantMessage(
           assistantText,
@@ -1502,6 +1703,9 @@ export async function runChatScreen(context) {
       redrawScreen({ fullRefresh: true });
     }
   } finally {
+    if (mcpRegistry) {
+      await stopMcpServers(mcpRegistry).catch(() => {});
+    }
     teardownViewport();
     resetLiveRegionState = () => {};
   }

@@ -5,8 +5,9 @@ import { deepseekProvider } from "./deepseek.js";
 import { ollamaProvider } from "./ollama.js";
 import { lmstudioProvider } from "./lmstudio.js";
 import { modelscopeProvider } from "./modelscope.js";
+import { xiaomimimoProvider } from "./xiaomimimo.js";
 
-export const PROVIDERS = [openaiProvider, anthropicProvider, googleProvider, deepseekProvider, ollamaProvider, lmstudioProvider, modelscopeProvider];
+export const PROVIDERS = [openaiProvider, anthropicProvider, googleProvider, deepseekProvider, ollamaProvider, lmstudioProvider, modelscopeProvider, xiaomimimoProvider];
 
 export function hasProvider(id) {
   return PROVIDERS.some((provider) => provider.id === id);

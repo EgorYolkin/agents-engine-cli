@@ -39,3 +39,39 @@ export const TOOL_DEFINITIONS = [
 export function getToolDefinition(name) {
   return TOOL_DEFINITIONS.find((t) => t.name === name);
 }
+
+/**
+ * Check whether a tool name is an MCP-namespaced tool.
+ * MCP tools use the format: mcp__<serverId>__<toolName>
+ *
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isMcpTool(name) {
+  return name.startsWith("mcp__");
+}
+
+/**
+ * Convert MCP tools from the registry into ToolDefinition format.
+ *
+ * @param {object|null} registry - MCP registry instance (or null)
+ * @returns {ToolDefinition[]}
+ */
+export function getMcpToolDefinitions(registry) {
+  if (!registry) return [];
+  return registry.getAllTools().map((entry) => ({
+    name: entry.name,
+    description: `[MCP:${entry.serverId}] ${entry.description}`,
+    parameters: entry.inputSchema,
+  }));
+}
+
+/**
+ * Get all tool definitions: built-in + MCP tools from the registry.
+ *
+ * @param {object|null} registry - MCP registry instance (or null)
+ * @returns {ToolDefinition[]}
+ */
+export function getAllToolDefinitions(registry) {
+  return [...TOOL_DEFINITIONS, ...getMcpToolDefinitions(registry)];
+}

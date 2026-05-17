@@ -161,6 +161,7 @@ async function readTomlFile(filePath) {
   if (!(await fileExists(filePath))) return null;
   const content = await fs.readFile(filePath, "utf8");
   const parsed = parseToml(content);
+  if (Object.keys(parsed).length === 0) return null;
   const result = userConfigSchema.safeParse(parsed);
   if (!result.success) {
     throw new Error(
@@ -355,6 +356,7 @@ function toUserConfig(config) {
     tools: config.tools,
     providers: config.providers,
     prompts: config.prompts,
+    mcp: config.mcp,
   };
 }
 

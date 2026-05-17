@@ -173,6 +173,7 @@ const toolsSchema = z
         timeout_ms: z.number().int().positive().default(30_000),
         max_output_chars: z.number().int().positive().default(20_000),
         max_calls: z.number().int().positive().default(64),
+        auto_approve_readonly: z.boolean().default(true),
         allowed_commands: z
           .array(z.string().min(1))
           .default([
@@ -222,7 +223,7 @@ const mcpServerSchema = z
   })
   .strict();
 
-const mcpShema = z
+const mcpSchema = z
   .object({
     servers: z.record(z.string(), mcpServerSchema).default({}),
   })
@@ -254,7 +255,7 @@ export const userConfigSchema = z
       })
       .default({}),
     prompts: promptLayerPathsSchema.default({}),
-    mcp: mcpShema,
+    mcp: mcpSchema,
   })
   .strict();
 

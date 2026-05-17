@@ -198,6 +198,36 @@ export const CONTEXT_SOURCES = [
   },
 
   {
+    id: "mcp-servers",
+    priority: "normal",
+    async fetch({ config }) {
+      const servers = config.mcp?.servers ?? {};
+      const enabled = Object.entries(servers).filter(([, s]) => s.enabled);
+      if (enabled.length === 0) return null;
+
+      const lines = enabled.map(([id, s]) => {
+        const transport = s.transport ?? "stdio";
+        const detail = transport === "stdio"
+          ? `command: ${s.command} ${(s.args ?? []).join(" ")}`
+          : `url: ${s.url}`;
+        return `- ${id} (${transport}): ${detail}`;
+      });
+
+      const content = [
+        "## MCP Servers",
+        "",
+        "The following MCP servers are configured and connected:",
+        "",
+        ...lines,
+        "",
+        "Use MCP tools for documentation lookups, API references, and library queries.",
+      ].join("\n");
+
+      return makeResult("mcp-servers", content, "normal", "mcp-config");
+    },
+  },
+
+  {
     id: "project-system",
     priority: "low",
     async fetch({ config }) {
@@ -230,10 +260,10 @@ export function filterSourcesByIntent(intent) {
   if (!intent) return CONTEXT_SOURCES;
 
   const DOMAIN_SOURCES = {
-    devops: ["built-in", "global-system", "profile", "provider", "tools-file-ops", "project-mrmush", "project-system"],
-    backend: ["built-in", "global-system", "profile", "provider", "repo-map", "tools-file-ops", "project-mrmush", "project-system"],
-    frontend: ["built-in", "global-system", "profile", "provider", "tools-file-ops", "project-mrmush", "project-system"],
-    analysis: ["built-in", "global-system", "profile", "provider", "repo-map", "project-agents", "project-mrmush", "project-system"],
+    devops: ["built-in", "global-system", "profile", "provider", "mcp-servers", "tools-file-ops", "project-mrmush", "project-system"],
+    backend: ["built-in", "global-system", "profile", "provider", "mcp-servers", "repo-map", "tools-file-ops", "project-mrmush", "project-system"],
+    frontend: ["built-in", "global-system", "profile", "provider", "mcp-servers", "tools-file-ops", "project-mrmush", "project-system"],
+    analysis: ["built-in", "global-system", "profile", "provider", "mcp-servers", "repo-map", "project-agents", "project-mrmush", "project-system"],
     general: null,
   };
 

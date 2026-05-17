@@ -23,6 +23,10 @@
       "label": "ModelScope API",
       "missingEnv": "Не задана переменная {envKey}"
     },
+    "xiaomimimo": {
+      "label": "Xiaomi MiMo",
+      "missingEnv": "Не задана переменная {envKey}"
+    },
     "missingEnvSuffix": "env: {envKey}",
     "notInstalledSuffix": "не установлен"
   },
@@ -101,6 +105,8 @@
       "usage": "Показать общую usage статистику",
       "mcp": "Показать активные MCP-серверы",
       "update": "Проверить обновления Mr. Mush",
+      "fork": "Создать ответвление текущей сессии",
+      "new": "Начать новую сессию",
       "debug": "Переключить debug-режим",
       "statusbar": "Настроить status bar",
       "dot": "Выбрать маркер сообщений",
@@ -148,6 +154,8 @@
       "promptEdited": "prompt edited: {layer}",
       "promptReset": "prompt reset: {layer}",
       "promptHeader": "# {layer}",
+      "sessionStarted": "новая сессия начата",
+      "sessionForked": "сессия разветвлена — история скопирована в новую сессию",
       "sessionResumed": "сессия загружена: {title}",
       "themeInitialized": "theme initialized: {path}",
       "onboardCompleted": "настройка завершена: {providerId}/{model}, роутер: {routerProviderId}"

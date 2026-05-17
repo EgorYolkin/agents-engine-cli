@@ -1,55 +1,54 @@
+import { getProvider } from "../../providers/index.js";
+import { promptSearchSelect } from "../../ui/components/search-select.js";
 import { saveConfig } from "../../config/loader.js";
-import { selectProviderAndModel } from "../../ui/scenes/setup.js";
 import { errorResult, renderedResult, successResult } from "../results.js";
 
 export const modelCommand = {
   name: "model",
   descriptionKey: "commands.descriptions.model",
   usage: "/model",
-  async execute({ args, context, config }) {
+  async execute({ context, config }) {
     const { i18n } = context;
-    if (args.length > 0) {
-      return errorResult(i18n.t("commands.errors.usageModelUse"), i18n);
-    }
+    const providerId =
+      context.runtimeOverrides.providerId ?? config.activeProvider;
+    const currentModel =
+      context.runtimeOverrides.model ?? config.activeModel;
+    const provider = getProvider(providerId, i18n);
 
-    let selection;
+    let modelOptions;
     try {
-      selection = await selectProviderAndModel(context);
+      modelOptions = await provider.fetchModels(config);
     } catch (error) {
       return errorResult(error.message, i18n);
     }
 
-    if (!selection) {
-      return renderedResult();
-    }
+    const selected = await promptSearchSelect(
+      i18n.t("switch.prompts.value", { target: "Model" }),
+      modelOptions,
+      context.ui?.theme ?? {},
+      {
+        initialQuery: currentModel,
+      },
+    );
+
+    if (selected === null) return renderedResult();
 
     context.runtimeOverrides = {
       ...context.runtimeOverrides,
-      providerId: selection.providerId,
-      model: selection.model,
-      config: {
-        ...(context.runtimeOverrides.config ?? {}),
-        auth: {
-          ...(context.runtimeOverrides.config?.auth ?? {}),
-          ...(selection.authPatch ?? {}),
-        },
-      },
+      providerId,
+      model: selected,
     };
 
     const nextConfig = await saveConfig(
       {
         ...config,
-        active_provider: selection.providerId,
-        active_model: selection.model,
-        auth: {
-          ...config.auth,
-          ...(selection.authPatch ?? {}),
-        },
+        active_provider: providerId,
+        active_model: selected,
         providers: {
           ...config.providers,
-          [selection.providerId]: {
-            ...config.providers[selection.providerId],
-            model: selection.model,
+          [providerId]: {
+            ...config.providers[providerId],
+            model: selected,
           },
         },
       },
@@ -58,13 +57,13 @@ export const modelCommand = {
     context.config = {
       ...config,
       ...nextConfig,
-      activeProvider: selection.providerId,
-      activeModel: selection.model,
+      activeProvider: providerId,
+      activeModel: selected,
     };
 
     return successResult(
       i18n.t("commands.messages.modelSet", {
-        model: `${selection.providerId}/${selection.model}`,
+        model: `${providerId}/${selected}`,
       }),
     );
   },

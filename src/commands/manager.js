@@ -2,9 +2,11 @@ import { cardCommand } from "./commands/card.js";
 import { configCommand } from "./commands/config.js";
 import { debugCommand } from "./commands/debug.js";
 import { dotCommand } from "./commands/dot.js";
+import { forkCommand } from "./commands/fork.js";
 import { initThemeCommand } from "./commands/inittheme.js";
 import { mcpCommand } from "./commands/mcp.js";
 import { modelCommand } from "./commands/model.js";
+import { newCommand } from "./commands/new.js";
 import { onboardCommand } from "./commands/onboard.js";
 import { profileCommand } from "./commands/profile.js";
 import { promptCommand } from "./commands/prompt.js";
@@ -23,6 +25,8 @@ const BUILT_IN_COMMANDS = [
   modelCommand,
   profileCommand,
   promptCommand,
+  newCommand,
+  forkCommand,
   resumeCommand,
   cardCommand,
   usageCommand,

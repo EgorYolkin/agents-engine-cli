@@ -81,9 +81,9 @@ function render({ title, bodyLines, options, selectedIdx, rerender = false }) {
   const approvalBlockLines = allLines.length;
 
   if (rerender) {
-    process.stdout.write(`\x1b[${approvalBlockLines}A`);
+    // Move up to the start of the picker and clear only its lines.
+    process.stdout.write(`\x1b[${approvalBlockLines}A\r\x1b[J`);
   }
-  process.stdout.write("\r\x1b[J");
   // Hide cursor during selection
   process.stdout.write("\x1b[?25l");
   process.stdout.write(allLines.join("\n") + "\n");

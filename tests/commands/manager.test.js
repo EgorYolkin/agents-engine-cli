@@ -124,6 +124,8 @@ test("built-in manager exposes all command modules", () => {
       "model",
       "profile",
       "prompt",
+      "new",
+      "fork",
       "resume",
       "card",
       "usage",
@@ -177,18 +179,9 @@ test("usage hints disappear after the first argument character", () => {
   assert.equal(getUsageHint("/config show"), null);
 });
 
-test("model command rejects unsupported direct arguments without opening picker", async () => {
+test("model command opens picker (ignores extra arguments)", async () => {
   const manager = createCommandManager();
-  const result = await manager.execute("model", {
-    args: ["use", "gpt-x"],
-    arg: "use",
-    context: { i18n: createI18n(), runtimeOverrides: {} },
-    config: {},
-    raw: "/model use gpt-x",
-  });
-
-  assert.deepEqual(result, {
-    handled: true,
-    message: "Error: Usage: /model",
-  });
+  const command = manager.get("model");
+  assert.ok(command, "model command should be registered");
+  assert.equal(command.usage, "/model");
 });

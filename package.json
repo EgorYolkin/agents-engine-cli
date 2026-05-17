@@ -13,6 +13,7 @@
   "dependencies": {
     "@clack/prompts": "^0.9.1",
     "@messageformat/core": "^3.4.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "chalk": "^5.4.1",
     "figures": "^6.1.0",
     "smol-toml": "^1.6.1",
