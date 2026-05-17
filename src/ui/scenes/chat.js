@@ -19,7 +19,7 @@ import { createSession, recordMessage } from "../../history/session.js";
 import { formatDuration, formatTokenCount } from "../../history/metrics.js";
 import { buildMushCardFrame } from "../mush-card.js";
 import { prepareInlineTerminalSurface } from "../components/terminal.js";
-import { activeTheme, color } from "../components/theme.js";
+import { activeTheme, color, resolveSymbol } from "../components/theme.js";
 import { frameWidth, fitText } from "../components/layout.js";
 import {
   buildAiMessageFrame,
