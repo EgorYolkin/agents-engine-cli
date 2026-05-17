@@ -7,6 +7,94 @@
 const FORBIDDEN_SHELL_CHARS = /[;&<>`$(){}[\]\n\r]/;
 
 /**
+ * Commands that only read data and never modify the filesystem or state.
+ * Used to auto-approve read-only operations without prompting the user.
+ */
+const READ_ONLY_COMMANDS = new Set([
+  "pwd",
+  "ls",
+  "find",
+  "rg",
+  "cat",
+  "head",
+  "tail",
+  "tree",
+  "grep",
+  "wc",
+  "file",
+  "stat",
+  "du",
+  "which",
+  "echo",
+  "sort",
+  "uniq",
+  "cut",
+  "tr",
+  "less",
+  "more",
+  "basename",
+  "dirname",
+]);
+
+/** Git subcommands that are read-only. */
+const READ_ONLY_GIT_SUBCOMMANDS = new Set([
+  "status",
+  "diff",
+  "log",
+  "show",
+  "branch",
+  "tag",
+  "remote",
+  "describe",
+  "rev-parse",
+  "ls-files",
+  "ls-remote",
+  "blame",
+]);
+
+/**
+ * Check whether a single parsed command argv is read-only.
+ *
+ * @param {string[]} argv
+ * @returns {boolean}
+ */
+function isReadOnlySegment(argv) {
+  if (argv.length === 0) return false;
+  const base = argv[0];
+
+  if (base === "git") {
+    const sub = argv[1] ?? "";
+    return READ_ONLY_GIT_SUBCOMMANDS.has(sub);
+  }
+
+  if (base === "sed") {
+    // `sed` without `-i` is read-only (transforms output, doesn't write files).
+    return !argv.some((arg) => arg === "-i" || arg.startsWith("-i"));
+  }
+
+  return READ_ONLY_COMMANDS.has(base);
+}
+
+/**
+ * Check whether a bash command string is entirely read-only.
+ * Supports pipes — returns true only if ALL segments are read-only.
+ *
+ * @param {string} cmd
+ * @returns {boolean}
+ */
+export function isReadOnlyBashCommand(cmd) {
+  if (typeof cmd !== "string" || cmd.trim().length === 0) return false;
+  const segments = cmd.split("|").map((s) => s.trim()).filter(Boolean);
+  if (segments.length === 0) return false;
+
+  return segments.every((segment) => {
+    const parsed = parseCommand(segment);
+    if (!parsed.ok) return false;
+    return isReadOnlySegment(parsed.argv);
+  });
+}
+
+/**
  * Characters that are dangerous inside double-quoted strings because
  * the shell (or spawn with shell:true) expands them.
  */
