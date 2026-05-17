@@ -17,48 +17,33 @@ function createModelBlock() {
     },
     async getOptions(context, config) {
       const providerId = context.runtimeOverrides.providerId ?? config.activeProvider;
-      const selection = await selectModelForProvider(
-        context,
-        providerId,
-        { messageKey: "switch.prompts.model" },
-      );
-      if (!selection) return null;
-      return [{
-        value: selection.model,
-        label: selection.model,
-        description: providerId,
-        meta: selection,
-      }];
+      const provider = getProvider(providerId, context.i18n);
+      const models = await provider.fetchModels(config);
+      const currentModel = context.runtimeOverrides.model ?? config.activeModel;
+      return models.map((m) => ({
+        value: m.value,
+        label: m.label ?? m.value,
+        description: m.value === currentModel ? "current" : providerId,
+      }));
     },
     async apply(context, config, option) {
-      const selection = option.meta;
+      const providerId = context.runtimeOverrides.providerId ?? config.activeProvider;
       context.runtimeOverrides = {
         ...context.runtimeOverrides,
-        providerId: selection.providerId,
-        model: selection.model,
-        config: {
-          ...(context.runtimeOverrides.config ?? {}),
-          auth: {
-            ...(context.runtimeOverrides.config?.auth ?? {}),
-            ...(selection.authPatch ?? {}),
-          },
-        },
+        providerId,
+        model: option.value,
       };
 
       const nextConfig = await saveConfig(
         {
           ...config,
-          active_provider: selection.providerId,
-          active_model: selection.model,
-          auth: {
-            ...config.auth,
-            ...(selection.authPatch ?? {}),
-          },
+          active_provider: providerId,
+          active_model: option.value,
           providers: {
             ...config.providers,
-            [selection.providerId]: {
-              ...config.providers[selection.providerId],
-              model: selection.model,
+            [providerId]: {
+              ...config.providers[providerId],
+              model: option.value,
             },
           },
         },
@@ -68,13 +53,13 @@ function createModelBlock() {
       context.config = {
         ...config,
         ...nextConfig,
-        activeProvider: selection.providerId,
-        activeModel: selection.model,
+        activeProvider: providerId,
+        activeModel: option.value,
       };
 
       return {
         message: context.i18n.t("commands.messages.modelSet", {
-          model: `${selection.providerId}/${selection.model}`,
+          model: `${providerId}/${option.value}`,
         }),
       };
     },
