@@ -1442,12 +1442,12 @@ export async function runChatScreen(context) {
               redrawScreen({ fullRefresh: true });
             }
           },
-          onAssistantToolIntent: async ({ assistantText, assistantMessage }) => {
+          onAssistantToolIntent: async ({ assistantText, assistantMessage, toolCalls: normalizedToolCalls }) => {
             flushToolEvents({ onTerminalEvent: enableTerminalExpansion });
 
-            const toolCalls = assistantMessage?.tool_calls ?? [];
+            const toolCalls = normalizedToolCalls ?? assistantMessage?.tool_calls ?? [];
             const hasApprovalTools = toolCalls.some((tc) => {
-              const name = tc.function?.name ?? tc.name ?? "";
+              const name = tc.name ?? tc.function?.name ?? "";
               return !name.startsWith("mcp__");
             });
             const isMcpOnly = !hasApprovalTools && toolCalls.length > 0;
@@ -1645,7 +1645,7 @@ export async function runChatScreen(context) {
         clearLiveRegion();
         if (abort.signal.aborted) {
           process.stdout.write(
-            "\r\x1b[J\n  " + chalk.dim(i18n.t("chat.messages.aborted")) + "\n",
+            "\r\x1b[J  " + chalk.dim(i18n.t("chat.messages.aborted")) + "\n",
           );
         } else {
           if (context.config.orchestrator?.enabled) {
