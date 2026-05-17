@@ -69,7 +69,11 @@ function isReadOnlySegment(argv) {
 
   if (base === "sed") {
     // `sed` without `-i` is read-only (transforms output, doesn't write files).
-    return !argv.some((arg) => arg === "-i" || arg.startsWith("-i"));
+    // Check for `-i`, `-iSUFFIX`, and combined flags like `-ni` or `-nie`.
+    return !argv.some((arg) =>
+      arg === "-i" || arg.startsWith("-i") ||
+      (arg.startsWith("-") && !arg.startsWith("--") && arg.includes("i"))
+    );
   }
 
   return READ_ONLY_COMMANDS.has(base);
