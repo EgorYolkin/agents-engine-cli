@@ -291,17 +291,3 @@ export async function runSwitchFlow(
   return { handled: true, message: applied.message };
 }
 
-export function restoreInputFrame(inputApi) {
-  if (!inputApi) return;
-  const frame = inputApi.getFrame();
-  renderInputBox(
-    inputApi.getBuffer(),
-    [],
-    0,
-    inputApi.theme,
-    inputApi.renderState,
-    inputApi.status,
-    inputApi.getCursorIndex(),
-  );
-  return frame;
-}
