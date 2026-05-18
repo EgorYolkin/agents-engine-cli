@@ -33,6 +33,7 @@ import {
 } from "../components/frame.js";
 import { formatPendingLine } from "../components/pending.js";
 import { startMcpServers, stopMcpServers } from "../../mcp/lifecycle.js";
+import { paraphraseQuery } from "../../experiments/paraphrase.js";
 
 // ─── Scene-level helpers ──────────────────────────────────────────────────────
 
@@ -277,9 +278,12 @@ function injectMcpToolsIntoPromptStack(context, registry) {
 
 // ─── Print helpers — own process.stdout.write, call frame builders ────────────
 
-function printUserMessage(text, context) {
+function printUserMessage(text, context, { stripTrailingNewlines = false } = {}) {
   const frame = buildUserMessageFrame(text, context);
-  process.stdout.write(frame.text);
+  const output = stripTrailingNewlines
+    ? frame.text.replace(/\n+$/, "")
+    : frame.text;
+  process.stdout.write(output);
   return frame.blockHeight;
 }
 
@@ -352,6 +356,33 @@ export function buildMessagesFromTranscript(
   for (const entry of recent) {
     if (entry.role === "user") {
       messages.push({ role: "user", content: entry.text });
+      continue;
+    }
+    // Entries with raw tool data: reconstruct assistant + tool messages.
+    if (entry.toolCalls?.length && entry.toolResults?.length) {
+      const payload = entry.assistantPayload;
+      const assistantMsg = payload
+        ? {
+            role: "assistant",
+            content: payload.content ?? entry.text ?? "",
+            ...(payload.reasoning_content
+              ? { reasoning_content: payload.reasoning_content }
+              : {}),
+            tool_calls: entry.toolCalls,
+          }
+        : {
+            role: "assistant",
+            content: entry.text ?? null,
+            tool_calls: entry.toolCalls,
+          };
+      messages.push(assistantMsg);
+      for (const tr of entry.toolResults) {
+        messages.push({
+          role: "tool",
+          tool_call_id: tr.id,
+          content: JSON.stringify(tr.result),
+        });
+      }
       continue;
     }
     const assistantMessage = buildReplayAssistantMessage(entry, providerId);
@@ -690,20 +721,20 @@ export async function runChatScreen(context) {
     renderedTranscriptEntries = transcript.length;
   }
 
-  function flushToolEvents({ onTerminalEvent = null } = {}) {
-    if (pendingToolEvents.length === 0) return;
-    const events = pendingToolEvents.splice(0);
+  function flushToolEvents({ onTerminalEvent = null, events = null } = {}) {
+    const resolvedEvents = events ?? pendingToolEvents.splice(0);
+    if (resolvedEvents.length === 0) return;
 
     // Build a compact combined block: one header, all events below.
     const theme = activeTheme(context);
     const symbol = resolveSymbol(context);
     const accent = color(theme, "accent", chalk.magenta);
     const muted = color(theme, "muted", chalk.dim);
-    const name = theme.layout?.agentName ?? "mr. mush";
+    const name = theme.layout?.agentName ?? "Mush";
     const contentWidth = Math.max(1, (process.stdout.columns || 80) - 4);
 
     const lines = [`${accent(`${symbol}\u00A0${name}`)}`];
-    for (const ev of events) {
+    for (const ev of resolvedEvents) {
       const title = ev.meta?.title ?? ev.meta?.kind ?? "tool";
       const bodyLines = buildMessageLines(ev.text, contentWidth);
       if (ev.meta?.kind === "terminal_event") {
@@ -729,7 +760,7 @@ export async function runChatScreen(context) {
 
     // Enable expansion for any terminal_event entries in the batch
     if (onTerminalEvent) {
-      for (const ev of events) {
+      for (const ev of resolvedEvents) {
         if (ev.meta?.kind === "terminal_event") {
           onTerminalEvent(transcript.at(-1));
           break;
@@ -825,7 +856,19 @@ export async function runChatScreen(context) {
 
   function renderTranscriptEntry(entry) {
     if (entry.role === "user") {
-      printUserMessage(entry.text, context);
+      const hasRewrite = Boolean(entry.rewrite);
+      printUserMessage(entry.text, context, { stripTrailingNewlines: hasRewrite });
+      if (hasRewrite) {
+        const theme = activeTheme(context);
+        const muted = color(theme, "muted", chalk.dim);
+        const contentWidth = Math.max(1, (process.stdout.columns || 80) - 4);
+        const rewriteLines = buildMessageLines(entry.rewrite, contentWidth);
+        const lines = [];
+        for (const line of rewriteLines) {
+          lines.push(muted(`  ${line}`));
+        }
+        process.stdout.write("\n" + lines.join("\n") + "\n\n");
+      }
     } else if (!entry.text?.trim()) {
       return;
     } else if (entry.meta?.kind === "terminal_event") {
@@ -833,8 +876,7 @@ export async function runChatScreen(context) {
     } else if (entry.meta?.kind === "tool_event") {
       printToolEventMessage(entry.meta.title ?? "tool", entry.text, context);
     } else if (entry.meta?.kind === "tool_batch") {
-      // Already printed by flushToolEvents() — skip re-rendering
-      return;
+      process.stdout.write(entry.text);
     } else {
       printAiMessage(entry.text, context);
     }
@@ -1126,7 +1168,9 @@ export async function runChatScreen(context) {
         };
       }
 
-      transcript.push({ role: "user", text });
+      // Show user message immediately
+      transcript.push({ role: "user", text, rewrite: null });
+
       debugStepCounter = 0;
       context.currentSessionMetrics = {
         ...(context.currentSessionMetrics ?? {
@@ -1159,6 +1203,7 @@ export async function runChatScreen(context) {
       let activeBlockMode = "none";
       let expandableTerminalEntry = null;
       let expandKeyHandler = null;
+      let inputBufferBeforeToolCall = "";
 
       function clearVisibleInput() {
         if (!inputVisible) return;
@@ -1362,7 +1407,26 @@ export async function runChatScreen(context) {
         inputVisible = true;
         process.stdout.on("resize", resizeHandler);
         startPendingAnimation();
-        const promptForModel = await buildPromptWithFileMentions(text, context);
+
+        // Experimental: paraphrase query before sending to model
+        let effectivePrompt = text;
+        if (context.config.experiments?.paraphrase) {
+          const paraphraseResult = await paraphraseQuery(text, context.config, context.runtimeOverrides);
+          if (paraphraseResult.paraphrased !== text) {
+            effectivePrompt = paraphraseResult.paraphrased;
+            // Update transcript entry with rewrite
+            transcript[transcript.length - 1] = {
+              ...transcript[transcript.length - 1],
+              rewrite: paraphraseResult.paraphrased,
+            };
+            stopPendingAnimation();
+            clearLiveRegion();
+            redrawScreen({ fullRefresh: true });
+            startPendingAnimation();
+          }
+        }
+
+        const promptForModel = await buildPromptWithFileMentions(effectivePrompt, context);
         const messages = buildMessagesFromTranscript(
           context.config.promptStack,
           transcript,
@@ -1387,11 +1451,11 @@ export async function runChatScreen(context) {
           );
         }
         let answeredFromRepoMap = false;
-        if (repoMapLayer && isRepoIntelligencePrompt(text)) {
+        if (repoMapLayer && isRepoIntelligencePrompt(effectivePrompt)) {
           const directRepoMapAnswer = await buildRepoMapAnswerForPrompt(
             context.cwd,
             repoMapLayer.content,
-            text,
+            effectivePrompt,
           );
           if (directRepoMapAnswer) {
             answeredFromRepoMap = true;
@@ -1428,10 +1492,10 @@ export async function runChatScreen(context) {
             : null,
           beforeApproval: () => {
             stopPendingAnimation();
+            // Keep passive input alive during tool execution so the user
+            // can see what they typed. Only clear it from the live region.
             if (passiveInput) {
               clearVisibleInput();
-              queuedInput = passiveInput.stop();
-              passiveInput = null;
             }
           },
           afterApproval: () => {
@@ -1443,23 +1507,18 @@ export async function runChatScreen(context) {
             }
           },
           onAssistantToolIntent: async ({ assistantText, assistantMessage, toolCalls: normalizedToolCalls }) => {
-            flushToolEvents({ onTerminalEvent: enableTerminalExpansion });
-
-            const toolCalls = normalizedToolCalls ?? assistantMessage?.tool_calls ?? [];
-            const hasApprovalTools = toolCalls.some((tc) => {
-              const name = tc.name ?? tc.function?.name ?? "";
-              return !name.startsWith("mcp__");
-            });
-            const isMcpOnly = !hasApprovalTools && toolCalls.length > 0;
-            if (isMcpOnly) return;
-
             stopPendingAnimation();
             if (streamRedrawTimer) {
               clearTimeout(streamRedrawTimer);
               streamRedrawTimer = null;
             }
             clearLiveRegion();
+            // Capture raw tool results before flush clears the array.
+            const capturedToolEvents = pendingToolEvents.splice(0);
+
+            // Store current input buffer before clearing it for tool calls
             if (passiveInput) {
+              inputBufferBeforeToolCall = passiveInput.getBuffer();
               queuedInput = passiveInput.stop();
               passiveInput = null;
               inputVisible = false;
@@ -1469,31 +1528,104 @@ export async function runChatScreen(context) {
               stripToolMarkup(streamedText).trim().length > 0
                 ? stripToolMarkup(streamedText)
                 : stripToolMarkup(assistantText);
-            appendAssistantMessage(
-              visibleAssistantText,
-              null,
-              null,
-              assistantMessage
-                ? {
-                    content: assistantMessage.content ?? "",
-                    ...(assistantMessage.reasoning_content
-                      ? {
-                          reasoning_content:
-                            assistantMessage.reasoning_content,
-                        }
-                      : {}),
-                    ...(assistantMessage.tool_calls?.length
-                      ? { tool_calls: assistantMessage.tool_calls }
-                      : {}),
-                  }
-                : null,
-            );
+            const transcriptLenBefore = transcript.length;
+            if (visibleAssistantText.trim()) {
+              appendAssistantMessage(
+                visibleAssistantText,
+                null,
+                null,
+                assistantMessage
+                  ? {
+                      content: assistantMessage.content ?? "",
+                      ...(assistantMessage.reasoning_content
+                        ? {
+                            reasoning_content:
+                              assistantMessage.reasoning_content,
+                          }
+                        : {}),
+                      ...(assistantMessage.tool_calls?.length
+                        ? { tool_calls: assistantMessage.tool_calls }
+                        : {}),
+                    }
+                  : null,
+              );
+            }
             streamedText = "";
+
+            // Attach raw tool call/result data to the assistant transcript
+            // entry so buildMessagesFromTranscript can reconstruct proper
+            // tool messages for subsequent API calls (required by OpenAI-
+            // compatible APIs like DeepSeek).
+            if (normalizedToolCalls.length > 0) {
+              // Ensure an assistant entry exists for tool data attachment.
+              // If appendAssistantMessage was skipped (empty text), create one.
+              if (transcript.length === transcriptLenBefore) {
+                transcript.push({
+                  role: "assistant",
+                  text: "",
+                  assistantPayload: assistantMessage
+                    ? {
+                        content: assistantMessage.content ?? "",
+                        ...(assistantMessage.reasoning_content
+                          ? { reasoning_content: assistantMessage.reasoning_content }
+                          : {}),
+                        ...(assistantMessage.tool_calls?.length
+                          ? { tool_calls: assistantMessage.tool_calls }
+                          : {}),
+                      }
+                    : null,
+                });
+              }
+              const assistantEntry = transcript.at(-1);
+              assistantEntry.toolCalls = normalizedToolCalls.map((tc) => ({
+                id: tc.id,
+                type: "function",
+                function: {
+                  name: tc.name,
+                  arguments: JSON.stringify(tc.args),
+                },
+              }));
+              assistantEntry.toolResults = capturedToolEvents
+                .filter((ev) => ev.raw)
+                .map((ev) => ev.raw);
+            }
+
+            // Flush tool events for display (after assistant entry is created).
+            flushToolEvents({ onTerminalEvent: enableTerminalExpansion, events: capturedToolEvents });
+
+            // Restore input buffer after tool execution completes
+            if (inputBufferBeforeToolCall) {
+              // Create a new passive input buffer with the saved content
+              const restoreInput = () => {
+                passiveInput = createPassiveInputBuffer(i18n, activeTheme(context), {
+                  onEscape: () => abort.abort(),
+                  status: inputStatus(context, lastTokens, { generatedText: _statusbarCache.result }),
+                  autoResize: false,
+                  externalRender: true,
+                  onChange: () => {
+                    if (activeBlockMode === "stream" && streamedText) {
+                      renderStreamingState();
+                      return;
+                    }
+                    if (activeBlockMode === "pending") {
+                      renderPendingState();
+                    }
+                  },
+                });
+                inputVisible = true;
+
+                // The input will be rendered with the restored buffer
+                // when the main loop continues and calls renderInputBox
+              };
+
+              // Schedule input restoration for the next event cycle
+              queueMicrotask(restoreInput);
+            }
           },
           onToolResult: async ({ toolCall, toolResult }) => {
             const meta = createTerminalEventMeta(toolCall, toolResult);
             if (meta?.text) {
-              pendingToolEvents.push({ text: meta.text, meta });
+              pendingToolEvents.push({ text: meta.text, meta, raw: { id: toolCall.id, name: toolCall.name, result: toolResult } });
             }
             startPendingAnimation();
           },
@@ -1513,6 +1645,7 @@ export async function runChatScreen(context) {
             runtimeOverrides: context.runtimeOverrides,
             signal: abort.signal,
             context,
+            messages,
             errors: context.chatSessionOrchestrator.errors,
             maxErrors: context.chatSessionOrchestrator.maxErrors,
             hooks: {
@@ -1589,6 +1722,32 @@ export async function runChatScreen(context) {
             `response: chars=${response?.text?.length ?? 0} usage=${response?.usage ? "yes" : "no"} stream=${shouldStream ? "on" : "off"}`,
           );
         }
+
+        // Restore input buffer after direct tool execution completes
+        if (inputBufferBeforeToolCall && !response.assistantMessage) {
+          // Create a new passive input buffer with the saved content
+          const restoreInput = () => {
+            passiveInput = createPassiveInputBuffer(i18n, activeTheme(context), {
+              onEscape: () => abort.abort(),
+              status: inputStatus(context, lastTokens, { generatedText: _statusbarCache.result }),
+              autoResize: false,
+              externalRender: true,
+              onChange: () => {
+                if (activeBlockMode === "stream" && streamedText) {
+                  renderStreamingState();
+                  return;
+                }
+                if (activeBlockMode === "pending") {
+                  renderPendingState();
+                }
+              },
+            });
+            inputVisible = true;
+          };
+
+          // Schedule input restoration for the next event cycle
+          queueMicrotask(restoreInput);
+        }
         if (
           shouldStream &&
           (!response?.text || response.text.trim().length === 0) &&
@@ -1605,6 +1764,33 @@ export async function runChatScreen(context) {
             ...providerCall,
             onToken: null,
           });
+
+          // Restore input buffer after streaming retry completes
+          if (inputBufferBeforeToolCall) {
+            // Create a new passive input buffer with the saved content
+            const restoreInput = () => {
+              passiveInput = createPassiveInputBuffer(i18n, activeTheme(context), {
+                onEscape: () => abort.abort(),
+                status: inputStatus(context, lastTokens, { generatedText: _statusbarCache.result }),
+                autoResize: false,
+                externalRender: true,
+                onChange: () => {
+                  if (activeBlockMode === "stream" && streamedText) {
+                    renderStreamingState();
+                    return;
+                  }
+                  if (activeBlockMode === "pending") {
+                    renderPendingState();
+                  }
+                },
+              });
+              inputVisible = true;
+            };
+
+            // Schedule input restoration for the next event cycle
+            queueMicrotask(restoreInput);
+          }
+
           if (context.runtimeOverrides.debug) {
             stopPendingAnimation();
             clearLiveRegion();
@@ -1637,10 +1823,15 @@ export async function runChatScreen(context) {
           process.stdout.removeListener("resize", resizeHandler);
           resizeHandler = null;
         }
-        if (passiveInput) {
+        // Don't clear input if we just restored it after tool execution
+        // Only clear if we're starting a new request
+        if (passiveInput && !inputBufferBeforeToolCall) {
           queuedInput = passiveInput.stop();
           passiveInput = null;
           inputVisible = false;
+        } else if (inputBufferBeforeToolCall && passiveInput) {
+          // Keep the restored input
+          inputBufferBeforeToolCall = ""; // Reset so we don't restore again
         }
         clearLiveRegion();
         if (abort.signal.aborted) {
@@ -1683,10 +1874,15 @@ export async function runChatScreen(context) {
         streamRedrawTimer = null;
       }
       renderScheduled = false;
-      if (passiveInput) {
+      // Don't clear input if we just restored it after tool execution
+      // Only clear if we're starting a new request
+      if (passiveInput && !inputBufferBeforeToolCall) {
         queuedInput = passiveInput.stop();
         passiveInput = null;
         inputVisible = false;
+      } else if (inputBufferBeforeToolCall && passiveInput) {
+        // Keep the restored input
+        inputBufferBeforeToolCall = ""; // Reset so we don't restore again
       }
       disableTerminalExpansion();
 
