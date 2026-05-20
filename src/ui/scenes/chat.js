@@ -14,7 +14,11 @@ import {
 import { createTaskActor, waitForTaskActor } from "../../orchestrator/index.js";
 import { runProviderWithTools } from "../../tools/orchestrator.js";
 import { compactTranscript, buildDroppedSummary } from "../../compactor/index.js";
-import { estimateTokens, estimateMessagesTokens } from "../../context/tokenizer.js";
+import { estimateTokens, estimateMessagesTokens, estimateTokensFast, estimateTokensExact } from "../../context/tokenizer.js";
+import { getDb, saveArtifact, listSessionArtifacts } from "../../context/artifact-store.js";
+import { updateIdfMap, tokenize } from "../../context/idf-index.js";
+import { compactL1, compactL2, compactL3 } from "../../context/compactor.js";
+import { composeUnifiedContext } from "../../context/aggregator.js";
 import { createSession, recordMessage } from "../../history/session.js";
 import { formatDuration, formatTokenCount } from "../../history/metrics.js";
 import { buildMushCardFrame } from "../mush-card.js";
@@ -655,7 +659,60 @@ export async function runChatScreen(context) {
   let contextFrame = null;
   let mcpRegistry = null;
   let pendingToolEvents = [];
+  let db = null;
+  try {
+    db = await getDb(context.config);
+  } catch (err) {
+    if (process.env.MRMUSH_DEBUG) {
+      process.stderr.write(`[entropy] DB init error: ${err.message}\n`);
+    }
+  }
+  function generateSummary(text) {
+    const clean = String(text ?? "").trim().replace(/\s+/g, " ");
+    if (clean.length <= 120) return clean;
+    return clean.slice(0, 120) + "...";
+  }
 
+  async function recordEntropyArtifact(role, content) {
+    if (!db || !currentSession) return;
+    try {
+      const summaryText = generateSummary(content);
+      const tokens = estimateTokensFast(content);
+      const artifact = {
+        id: `art-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        role,
+        content,
+        summary: summaryText,
+        tokens,
+        ts: Math.floor(Date.now() / 1000),
+        session_id: currentSession.id,
+        intent: context.runtimeOverrides.intent || "general",
+        importance: 0.5
+      };
+
+      const processed = compactL1(artifact, estimateTokensFast);
+      await saveArtifact(db, processed);
+      updateIdfMap(currentSession.id, tokenize(content));
+    } catch (err) {
+      if (process.env.MRMUSH_DEBUG) {
+        process.stderr.write(`[entropy] recordArtifact error: ${err.message}\n`);
+      }
+    }
+  }
+
+  async function loadEntropySessionVocab(sessionId) {
+    if (!db) return;
+    try {
+      const artifacts = await listSessionArtifacts(db, sessionId);
+      for (const art of artifacts) {
+        updateIdfMap(sessionId, tokenize(art.content));
+      }
+    } catch (err) {
+      if (process.env.MRMUSH_DEBUG) {
+        process.stderr.write(`[entropy] loadSessionVocab error: ${err.message}\n`);
+      }
+    }
+  }
   context.chatSessionOrchestrator = {
     errors: context.chatSessionOrchestrator?.errors ?? 0,
     maxErrors: context.chatSessionOrchestrator?.maxErrors ?? 3,
@@ -702,6 +759,9 @@ export async function runChatScreen(context) {
         usage: usage ?? null,
         ...(assistantPayload ? { assistantPayload } : {}),
       }).catch(() => {});
+      if (db && normalizedText.trim()) {
+        recordEntropyArtifact("assistant", normalizedText).catch(() => {});
+      }
     }
     if (!normalizedText.trim()) {
       renderedTranscriptEntries = transcript.length;
@@ -835,6 +895,9 @@ export async function runChatScreen(context) {
       totalTokens: 0,
     };
     context.currentSessionDisplayedTokens = 0;
+    if (db && currentSession) {
+      await loadEntropySessionVocab(currentSession.id);
+    }
   } catch {
     // history unavailable — continue without persistence
   }
@@ -1023,6 +1086,9 @@ export async function runChatScreen(context) {
             role: "user",
             content: text,
           }).catch(() => {});
+          if (db) {
+            recordEntropyArtifact("user", text).catch(() => {});
+          }
         }
         redrawScreen();
         const commandResult = await executeCommand(text, context);
@@ -1046,6 +1112,9 @@ export async function runChatScreen(context) {
           };
           context.currentSessionDisplayedTokens =
             resumed.meta?.outputTokens ?? 0;
+          if (db && currentSession) {
+            await loadEntropySessionVocab(currentSession.id);
+          }
           transcript.splice(
             0,
             transcript.length,
@@ -1078,6 +1147,9 @@ export async function runChatScreen(context) {
               totalTokens: 0,
             };
             context.currentSessionStartedAt = context.currentSessionMeta.createdAt;
+            if (db && currentSession) {
+              await loadEntropySessionVocab(currentSession.id);
+            }
           } catch {
             // history unavailable — continue without persistence
           }
@@ -1108,6 +1180,9 @@ export async function runChatScreen(context) {
               totalTokens: 0,
             };
             context.currentSessionStartedAt = context.currentSessionMeta.createdAt;
+            if (db && currentSession) {
+              await loadEntropySessionVocab(currentSession.id);
+            }
           } catch {
             // history unavailable — continue without persistence
           }
@@ -1143,6 +1218,9 @@ export async function runChatScreen(context) {
                 role: "assistant",
                 content: commandResult.message,
               }).catch(() => {});
+              if (db) {
+                recordEntropyArtifact("assistant", commandResult.message).catch(() => {});
+              }
             }
           }
           redrawScreen();
@@ -1189,6 +1267,9 @@ export async function runChatScreen(context) {
           role: "user",
           content: text,
         }).catch(() => {});
+        if (db) {
+          recordEntropyArtifact("user", text).catch(() => {});
+        }
       }
       redrawScreen();
       const abort = new AbortController();
@@ -1427,12 +1508,72 @@ export async function runChatScreen(context) {
         }
 
         const promptForModel = await buildPromptWithFileMentions(effectivePrompt, context);
-        const messages = buildMessagesFromTranscript(
-          context.config.promptStack,
-          transcript,
-          promptForModel,
-          providerId,
-        );
+
+        // Run Compactions
+        const budget = context.config.intelligence?.context_budget ?? 8000;
+        const mappedTranscript = transcript.map(e => ({
+          role: e.role,
+          content: e.text ?? e.content ?? ""
+        }));
+        const warmTokens = estimateMessagesTokens(mappedTranscript);
+
+        if (warmTokens > budget * 0.85) {
+          if (transcript.length > 4) {
+            // Trigger background L3 compaction
+            await compactL3(transcript, {
+              db,
+              sessionId: currentSession.id,
+              config: context.config,
+              providerId,
+              modelId: model,
+              fastEstimateTokensFn: estimateTokens,
+              onComplete: ({ summaryArtifact, hotMessages }) => {
+                const newTranscript = [
+                  {
+                    role: summaryArtifact.role,
+                    text: summaryArtifact.content,
+                    summary: summaryArtifact.summary,
+                    tokens: summaryArtifact.tokens,
+                    ts: summaryArtifact.ts,
+                    offloaded: summaryArtifact.offloaded
+                  },
+                  ...hotMessages
+                ];
+                transcript.splice(0, transcript.length, ...newTranscript);
+                if (context.runtimeOverrides.debug) {
+                  appendDebugMessage(`[entropy] L3 compaction completed`);
+                }
+              }
+            });
+          }
+        } else if (warmTokens > budget * 0.70) {
+          const { transcript: compactedTranscript, compacted } = compactL2(transcript, estimateTokens);
+          if (compacted) {
+            transcript.splice(0, transcript.length, ...compactedTranscript);
+            if (context.runtimeOverrides.debug) {
+              appendDebugMessage(`[entropy] L2 compaction applied`);
+            }
+          }
+        }
+
+        const res = await composeUnifiedContext({
+          db,
+          sessionId: currentSession?.id || "default",
+          userQuery: promptForModel,
+          transcript: transcript.map(e => ({
+            role: e.role,
+            content: e.text ?? e.content ?? ""
+          })),
+          config: context.config,
+          cwd: context.cwd,
+          intent: context.runtimeOverrides.intent || null
+        });
+
+        // Map res.layers to OpenAI standard messages array format
+        const messages = res.layers.map(l => ({
+          role: l.role,
+          content: l.content
+        }));
         const repoMapLayer = getRepoMapLayer(context.config.promptStack);
         if (context.runtimeOverrides.debug) {
           stopPendingAnimation();

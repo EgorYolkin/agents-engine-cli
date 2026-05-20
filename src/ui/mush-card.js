@@ -41,7 +41,7 @@ export function buildCardLines(context, rows = []) {
   const accent = color(theme, "accent", chalk.magenta);
   const width = frameWidth();
   const contentWidth = Math.max(1, width - 4);
-  const titleText = fitText(` ${theme.layout?.splashTitle ?? "MR. MUSH"}`, contentWidth);
+  const titleText = fitText(` ${theme.layout?.splashTitle ?? "Mush"}`, contentWidth);
   const splash = theme.layout?.splash ?? [];
   const artRows = shiftBlockLeft(splash.map((line) => fitText(line, contentWidth)), 2);
   const footerRow = rows.at(-1) ?? null;

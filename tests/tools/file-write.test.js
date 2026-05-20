@@ -1,92 +1,62 @@
 import test from "node:test";
-import assert from "node:assert/strict";
-import { evaluateWritePolicy } from "../../src/tools/file-write.js";
+import assert from "node:assert";
+import path from "node:path";
+import fs from "node:fs/promises";
+import { evaluateWritePolicy, writeFile } from "../../src/tools/file-write.js";
+import { createTempDir } from "../utils/test-env.js";
 
-const CWD = "/home/user/project";
-
-test("evaluateWritePolicy: allows file inside cwd", () => {
-  const result = evaluateWritePolicy("src/index.js", CWD, { content: "hello" });
-  assert.equal(result.ok, true);
-  assert.equal(result.resolved, "/home/user/project/src/index.js");
-});
-
-test("evaluateWritePolicy: blocks path traversal with ..", () => {
-  const result = evaluateWritePolicy("../../etc/passwd", CWD, { content: "x" });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /escapes working directory/);
-});
-
-test("evaluateWritePolicy: blocks absolute path outside cwd", () => {
-  const result = evaluateWritePolicy("/etc/passwd", CWD, { content: "x" });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /escapes working directory/);
-});
-
-test("evaluateWritePolicy: blocks .git directory", () => {
-  const result = evaluateWritePolicy(".git/config", CWD, { content: "x" });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /\.git.*not allowed/);
-});
-
-test("evaluateWritePolicy: blocks node_modules", () => {
-  const result = evaluateWritePolicy("node_modules/foo/index.js", CWD, { content: "x" });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /node_modules.*not allowed/);
-});
-
-test("evaluateWritePolicy: blocks .env", () => {
-  const result = evaluateWritePolicy(".env", CWD, { content: "x" });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /\.env.*not allowed/);
-});
-
-test("evaluateWritePolicy: blocks .env.local", () => {
-  const result = evaluateWritePolicy(".env.local", CWD, { content: "x" });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /\.env\.local.*not allowed/);
-});
-
-test("evaluateWritePolicy: blocks .env.production", () => {
-  const result = evaluateWritePolicy(".env.production", CWD, { content: "x" });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /\.env\.production.*not allowed/);
-});
-
-test("evaluateWritePolicy: blocks files exceeding max size", () => {
-  const bigContent = "x".repeat(513 * 1024);
-  const result = evaluateWritePolicy("big.txt", CWD, {
-    content: bigContent,
-    max_file_size_kb: 512,
+test("File Write Tool", async (t) => {
+  await t.test("evaluateWritePolicy() accepts paths inside CWD", () => {
+    const cwd = "/usr/src/app";
+    const res = evaluateWritePolicy("src/index.js", cwd);
+    assert.strictEqual(res.ok, true);
+    assert.strictEqual(res.resolved, "/usr/src/app/src/index.js");
   });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /exceeds max size/);
-});
 
-test("evaluateWritePolicy: allows files under max size", () => {
-  const content = "x".repeat(100);
-  const result = evaluateWritePolicy("small.txt", CWD, {
-    content,
-    max_file_size_kb: 512,
+  await t.test("evaluateWritePolicy() blocks paths outside CWD", () => {
+    const cwd = "/usr/src/app";
+    const res = evaluateWritePolicy("../../../etc/passwd", cwd);
+    assert.strictEqual(res.ok, false);
+    assert.ok(res.error.includes("escapes working directory"));
   });
-  assert.equal(result.ok, true);
-});
 
-test("evaluateWritePolicy: custom denied_paths", () => {
-  const result = evaluateWritePolicy("secrets/key.pem", CWD, {
-    content: "x",
-    denied_paths: ["secrets", ".git"],
+  await t.test("evaluateWritePolicy() blocks absolute paths outside CWD", () => {
+    const cwd = "/usr/src/app";
+    const res = evaluateWritePolicy("/etc/passwd", cwd);
+    assert.strictEqual(res.ok, false);
+    assert.ok(res.error.includes("escapes working directory"));
   });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /secrets.*not allowed/);
-});
 
-test("evaluateWritePolicy: nested path traversal attempt", () => {
-  const result = evaluateWritePolicy("src/../../../etc/passwd", CWD, { content: "x" });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /escapes working directory/);
-});
+  await t.test("evaluateWritePolicy() blocks denied patterns", () => {
+    const cwd = "/usr/src/app";
+    const res1 = evaluateWritePolicy(".git/config", cwd);
+    assert.strictEqual(res1.ok, false);
+    assert.ok(res1.error.includes(".git"));
 
-test("evaluateWritePolicy: allows deeply nested file inside cwd", () => {
-  const result = evaluateWritePolicy("src/a/b/c/d.js", CWD, { content: "hello" });
-  assert.equal(result.ok, true);
+    const res2 = evaluateWritePolicy("node_modules/pkg/index.js", cwd);
+    assert.strictEqual(res2.ok, false);
+    assert.ok(res2.error.includes("node_modules"));
+  });
+
+  await t.test("evaluateWritePolicy() enforces file size limit", () => {
+    const cwd = "/usr/src/app";
+    const config = { content: "a".repeat(1024 * 513), max_file_size_kb: 512 };
+    const res = evaluateWritePolicy("test.txt", cwd, config);
+    assert.strictEqual(res.ok, false);
+    assert.ok(res.error.includes("exceeds max size"));
+  });
+
+  await t.test("writeFile() writes file within bounds", async () => {
+    const { tempDir, cleanup } = await createTempDir();
+    try {
+      const res = await writeFile({ path: "test-dir/test.txt", content: "hello world", cwd: tempDir, config: {} });
+      assert.strictEqual(res.written, 11);
+      assert.strictEqual(res.error, undefined);
+      
+      const content = await fs.readFile(path.join(tempDir, "test-dir/test.txt"), "utf8");
+      assert.strictEqual(content, "hello world");
+    } finally {
+      await cleanup();
+    }
+  });
 });

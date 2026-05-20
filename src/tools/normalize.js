@@ -34,15 +34,18 @@ export function formatToolsOpenAI(tools) {
  */
 export function normalizeToolCallOpenAI(raw) {
   let args;
+  let invalid = false;
   try {
     args = JSON.parse(raw.function.arguments);
   } catch {
     args = {};
+    invalid = true;
   }
   return {
     name: raw.function.name,
     args,
     id: raw.id ?? randomUUID(),
+    ...(invalid ? { invalid: true } : {}),
   };
 }
 

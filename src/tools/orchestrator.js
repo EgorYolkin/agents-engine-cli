@@ -8,7 +8,7 @@ import { runWithNativeTools } from "./native-loop.js";
 import { isMcpTool } from "./definitions.js";
 import { callMcpTool } from "../mcp/client.js";
 
-function toolErrorResult(call, message) {
+export function toolErrorResult(call, message) {
   if (call?.name === "write_file") {
     return {
       tool: "write_file",
@@ -184,7 +184,7 @@ async function runWithMarkdownTools({
   let currentPrompt = prompt;
   let lastResponse = null;
 
-  for (let callIndex = 0; callIndex <= maxCalls; callIndex += 1) {
+  for (let callIndex = 0; callIndex < maxCalls; callIndex += 1) {
     let tokenBuffer = "";
     let suppressStreaming = false;
     const marker = "```agents-tool";
@@ -233,8 +233,6 @@ async function runWithMarkdownTools({
     let toolResult;
     if (!parsed.ok) {
       toolResult = toolErrorResult(null, parsed.error);
-    } else if (callIndex >= maxCalls) {
-      toolResult = toolErrorResult(parsed.call, `tool call limit exceeded (${maxCalls})`);
     } else {
       toolResult = await executeToolCall(parsed.call, config.tools, context, {
         beforeApproval,

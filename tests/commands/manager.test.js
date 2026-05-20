@@ -118,9 +118,9 @@ test("built-in manager exposes all command modules", () => {
   assert.deepEqual(
     manager.list().map((command) => command.name),
     [
+      "benchmark",
       "think",
       "config",
-      "provider",
       "model",
       "profile",
       "prompt",
@@ -131,6 +131,7 @@ test("built-in manager exposes all command modules", () => {
       "usage",
       "update",
       "debug",
+      "experiments",
       "inittheme",
       "onboard",
       "statusbar",

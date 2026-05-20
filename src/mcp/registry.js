@@ -56,6 +56,15 @@ export function createMcpRegistry() {
    * @param {Array<{ name: string, description: string, inputSchema: object }>} tools
    */
   function register(id, client, serverVersion, serverCapabilities, tools) {
+    // Clean up old tool index entries if overwriting
+    const existing = servers.get(id);
+    if (existing) {
+      for (const tool of existing.tools) {
+        toolIndex.delete(qualifyToolName(id, tool.name));
+      }
+    }
+
+    const safeTools = tools ?? [];
     servers.set(id, {
       id,
       client,
@@ -63,11 +72,11 @@ export function createMcpRegistry() {
       serverCapabilities,
       status: "connected",
       error: null,
-      tools,
+      tools: safeTools,
     });
 
     // Index each tool
-    for (const tool of tools) {
+    for (const tool of safeTools) {
       const qualifiedName = qualifyToolName(id, tool.name);
       toolIndex.set(qualifiedName, {
         serverId: id,

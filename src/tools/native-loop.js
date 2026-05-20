@@ -1,6 +1,7 @@
 import { getAllToolDefinitions } from "./definitions.js";
 import { formatToolsOpenAI, normalizeToolCallOpenAI, formatToolResultOpenAI } from "./normalize.js";
 import { formatToolsGoogle, normalizeToolCallGoogle, formatToolResultGoogle } from "./normalize.js";
+import { executeToolCall, toolErrorResult } from "./orchestrator.js";
 
 /**
  * Build the initial messages array for a native tool calling conversation.
@@ -139,7 +140,7 @@ export async function runWithNativeTools({
   let currentMessages = buildInitialMessages(config.promptStack, prompt, messages);
   let lastResponse = null;
 
-  for (let callIndex = 0; callIndex <= maxCalls; callIndex += 1) {
+  for (let callIndex = 0; callIndex < maxCalls; callIndex += 1) {
     const isFirstTurn = callIndex === 0;
 
     const response = await provider.exec(
@@ -177,16 +178,8 @@ export async function runWithNativeTools({
     for (const call of normalizedCalls) {
       let result;
 
-      if (callIndex >= maxCalls) {
-        result = {
-          tool: call.name,
-          cmd: call.args?.cmd ?? "",
-          exit_code: null,
-          stdout: "",
-          stderr: `tool call limit exceeded (${maxCalls})`,
-          truncated: false,
-          blocked: true,
-        };
+      if (call.invalid) {
+        result = toolErrorResult(call, "invalid tool call arguments (malformed JSON)");
       } else {
         result = await executeToolCall(call, config.tools, context, {
           beforeApproval,

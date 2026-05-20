@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository is a Node.js ESM CLI package. The executable entry point is `bin/mr-mush.js`, which boots the Mr. Mush CLI, locale, UI, and routing. Core source lives in `src/`:
+This repository is a Node.js ESM CLI package. The executable entry point is `bin/mr-mush.js`, which boots the Mush CLI, locale, UI, and routing. Core source lives in `src/`:
 
 - `src/router.js` coordinates boot, setup, and chat scenes.
 - `src/config/` loads and validates TOML-backed configuration with Zod schemas.
@@ -15,7 +15,7 @@ There is no dedicated `tests/` directory yet. Add one when introducing the test 
 ## Build, Test, and Development Commands
 
 - `npm install` installs runtime dependencies from `package-lock.json`.
-- `node bin/mr-mush.js` runs Mr. Mush locally from the working tree.
+- `node bin/mr-mush.js` runs Mush locally from the working tree.
 - `npm link` exposes the `mr-mush` command globally.
 - `npm test` is not defined yet; add a package script before using it in CI.
 

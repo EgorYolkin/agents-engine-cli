@@ -30,6 +30,16 @@
     "missingEnvSuffix": "env: {envKey}",
     "notInstalledSuffix": "not installed"
   },
+  "switch": {
+    "prompts": {
+      "target": "Choose what to switch:",
+      "value": "Choose a {target}:"
+    },
+    "errors": {
+      "unknownBlock": "Unknown block: {block}"
+    },
+    "currentValue": "current: {value}"
+  },
   "setup": {
     "cancelled": "Setup cancelled",
     "spinner": {
@@ -96,6 +106,7 @@
   },
   "commands": {
     "descriptions": {
+      "benchmark": "Run paraphrase benchmark",
       "think": "Set thinking effort level",
       "config": "Show, set, or persist config",
       "provider": "Switch active provider",
@@ -104,7 +115,7 @@
       "prompt": "Inspect or edit prompt layers",
       "usage": "Show total usage metrics",
       "mcp": "Show active MCP servers",
-      "update": "Check for Mr. Mush updates",
+      "update": "Check for Mush updates",
       "fork": "Fork current session into a new one",
       "new": "Start a new session",
       "debug": "Toggle debug mode",
@@ -113,7 +124,8 @@
       "resume": "Open session browser",
       "card": "Show mushroom card",
       "inittheme": "Create project theme.yaml",
-      "onboard": "Run onboarding again"
+      "onboard": "Run onboarding again",
+      "experiments": "Toggle experimental features"
     },
     "args": {
       "off": "No reasoning",
@@ -137,7 +149,8 @@
       "promptLayerProvider": "Provider prompt layer",
       "promptLayerProject": "Project prompt layer",
       "updateCheck": "Check latest version",
-      "updateInstall": "Check and install latest version"
+      "updateInstall": "Check and install latest version",
+      "status": "Show current status"
     },
     "messages": {
       "thinkingSet": "{tick} thinking: {level}",
@@ -176,20 +189,20 @@
   },
   "update": {
     "prompts": {
-      "install": "Mr. Mush {latestVersion} is available (current {currentVersion}). Install it now?"
+      "install": "Mush {latestVersion} is available (current {currentVersion}). Install it now?"
     },
     "messages": {
-      "available": "Mr. Mush {latestVersion} is available (current {currentVersion}). Run /update install to install it.",
+      "available": "Mush {latestVersion} is available (current {currentVersion}). Run /update install to install it.",
       "cancelled": "Update cancelled.",
-      "current": "Mr. Mush is up to date ({currentVersion}).",
-      "installed": "Update installed. Restart Mr. Mush to use the new version.",
+      "current": "Mush is up to date ({currentVersion}).",
+      "installed": "Update installed. Restart Mush to use the new version.",
       "installFailed": "Update install failed with exit code {code}.",
       "unavailable": "Could not check for updates right now."
     }
   },
   "themeTemplate": {
     "header": {
-      "title": "Mr. Mush theme for the current project.",
+      "title": "Mush theme for the current project.",
       "line1": "This file overrides the built-in theme and the global ~/.mrmush/theme.yaml.",
       "line2": "Change only the fields you need; missing values will be inherited.",
       "line3": "After editing, just restart mrmush in this project."

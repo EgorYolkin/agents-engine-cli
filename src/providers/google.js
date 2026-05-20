@@ -10,6 +10,12 @@ export const googleProvider = {
     return resolvedConfig.auth.google;
   },
 
+  async isAvailable(resolvedConfig = null) {
+    const envKey = resolvedConfig?.auth?.google?.env_key ?? "GEMINI_API_KEY";
+    const apiKey = resolvedConfig?.auth?.google?.api_key ?? process.env[envKey];
+    return Boolean(apiKey);
+  },
+
   async fetchModels(resolvedConfig = null) {
     const envKey = resolvedConfig?.auth?.google?.env_key ?? "GEMINI_API_KEY";
     const i18n = resolvedConfig?.i18n ?? null;

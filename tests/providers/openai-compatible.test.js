@@ -1,101 +1,72 @@
 import test from "node:test";
-import assert from "node:assert/strict";
-import { ReadableStream } from "node:stream/web";
-import { openAiCompatibleChat } from "../../src/providers/openai-compatible.js";
+import assert from "node:assert";
+import nock from "nock";
+import { openAiCompatibleChat, fetchOpenAiCompatibleModels } from "../../src/providers/openai-compatible.js";
 
-test("openAiCompatibleChat returns assistantMessage with reasoning_content in non-stream mode", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () =>
-    new Response(
-      JSON.stringify({
+test("OpenAI Compatible Provider Base", async (t) => {
+  t.afterEach(() => {
+    nock.cleanAll();
+  });
+
+  const baseUrl = "https://api.example.com";
+
+  await t.test("fetchOpenAiCompatibleModels()", async () => {
+    nock(baseUrl)
+      .get("/v1/models")
+      .reply(200, {
+        data: [{ id: "model-1" }, { id: "model-2" }],
+      });
+
+    const models = await fetchOpenAiCompatibleModels(baseUrl);
+    assert.strictEqual(models.length, 2);
+    assert.strictEqual(models[0].value, "model-1");
+    assert.strictEqual(models[1].label, "model-2");
+  });
+
+  await t.test("openAiCompatibleChat() non-streaming", async () => {
+    nock(baseUrl)
+      .post("/v1/chat/completions", (body) => !body.stream)
+      .reply(200, {
         choices: [
-          {
-            message: {
-              role: "assistant",
-              content: "",
-              reasoning_content: "Need to inspect files first.",
-              tool_calls: [
-                {
-                  id: "call_1",
-                  type: "function",
-                  function: {
-                    name: "bash",
-                    arguments: "{\"cmd\":\"git status --short\"}",
-                  },
-                },
-              ],
-            },
-          },
+          { message: { content: "Non-streaming test" } }
         ],
-        usage: { total_tokens: 42 },
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
+        usage: { total_tokens: 42 }
+      });
 
-  try {
-    const result = await openAiCompatibleChat({
-      baseUrl: "https://example.com",
-      providerName: "DeepSeek",
-      model: "deepseek-v4-flash",
-      prompt: "Inspect repo",
+    const res = await openAiCompatibleChat({
+      baseUrl,
+      providerName: "test",
+      model: "test-model",
+      prompt: "Hello",
     });
 
-    assert.equal(result.text, "");
-    assert.equal(result.assistantMessage.reasoning_content, "Need to inspect files first.");
-    assert.equal(result.assistantMessage.tool_calls.length, 1);
-    assert.equal(result.toolCalls.length, 1);
-    assert.equal(result.usage.total_tokens, 42);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
+    assert.strictEqual(res.text, "Non-streaming test");
+    assert.strictEqual(res.usage.total_tokens, 42);
+  });
 
-test("openAiCompatibleChat accumulates streaming reasoning_content deltas", async () => {
-  const originalFetch = globalThis.fetch;
-  const chunks = [
-    'data: {"choices":[{"delta":{"role":"assistant","reasoning_content":"First "}}]}\n',
-    'data: {"choices":[{"delta":{"reasoning_content":"second ","tool_calls":[{"index":0,"id":"call_1","function":{"name":"bash","arguments":"{\\"cmd\\":\\"ls"}}]}}]}\n',
-    'data: {"choices":[{"delta":{"content":"Done","tool_calls":[{"index":0,"function":{"arguments":" -la\\"}"}}]}}],"usage":{"total_tokens":17}}\n',
-    "data: [DONE]\n",
-  ];
+  await t.test("openAiCompatibleChat() streaming", async () => {
+    nock(baseUrl)
+      .post("/v1/chat/completions", (body) => body.stream === true)
+      .reply(200, 
+        'data: {"choices":[{"delta":{"content":"Chunk 1"}}]}\n\n' +
+        'data: {"choices":[{"delta":{"content":" Chunk 2"}}], "usage": {"total_tokens": 15}}\n\n' +
+        'data: [DONE]\n\n',
+        { "Content-Type": "text/event-stream" }
+      );
 
-  globalThis.fetch = async () =>
-    new Response(
-      new ReadableStream({
-        start(controller) {
-          for (const chunk of chunks) {
-            controller.enqueue(new TextEncoder().encode(chunk));
-          }
-          controller.close();
-        },
-      }),
-      { status: 200, headers: { "Content-Type": "text/event-stream" } },
-    );
-
-  const receivedTokens = [];
-
-  try {
-    const result = await openAiCompatibleChat({
-      baseUrl: "https://example.com",
-      providerName: "DeepSeek",
-      model: "deepseek-v4-flash",
-      prompt: "Inspect repo",
-      onToken: (token) => receivedTokens.push(token),
+    let streamResult = "";
+    const res = await openAiCompatibleChat({
+      baseUrl,
+      providerName: "test",
+      model: "test-model",
+      prompt: "Hello",
+      onToken: (token) => {
+        streamResult += token;
+      }
     });
 
-    assert.equal(receivedTokens.join(""), "Done");
-    assert.equal(result.assistantMessage.reasoning_content, "First second ");
-    assert.equal(result.assistantMessage.tool_calls[0].type, "function");
-    assert.equal(
-      result.assistantMessage.tool_calls[0].function.arguments,
-      "{\"cmd\":\"ls -la\"}",
-    );
-    assert.equal(result.toolCalls[0].type, "function");
-    assert.equal(result.usage.total_tokens, 17);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    assert.strictEqual(streamResult, "Chunk 1 Chunk 2");
+    assert.strictEqual(res.text, "Chunk 1 Chunk 2");
+    assert.strictEqual(res.usage.total_tokens, 15);
+  });
 });

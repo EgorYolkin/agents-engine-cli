@@ -2,7 +2,7 @@
  * @file MCP server configuration helpers.
  *
  * Each entry in config.mcp.servers represents an MCP server
- * that Mr. Mush can spawn or connect to.
+ * that Mush can spawn or connect to.
  *
  * stdio servers require `command` (and optional `args`).
  * http  servers require `url`.

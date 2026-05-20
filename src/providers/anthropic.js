@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import cp, { spawn } from "node:child_process";
+import { promisify } from "node:util";
 
 const MODELS = [
   { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
@@ -14,6 +15,16 @@ export const anthropicProvider = {
   defaultModel: "claude-sonnet-4-6",
   // Shells out to the claude CLI — no direct HTTP API, native tool calling unavailable.
   capabilities: { toolCalling: false },
+
+  async isAvailable() {
+    try {
+      const execFileAsync = promisify(cp.execFile);
+      await execFileAsync("claude", ["--version"]);
+      return true;
+    } catch {
+      return false;
+    }
+  },
 
   async fetchModels() {
     return MODELS;

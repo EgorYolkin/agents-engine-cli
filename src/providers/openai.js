@@ -1,7 +1,6 @@
-import { execFile, spawn } from "node:child_process";
+import cp, { spawn } from "node:child_process";
 import { promisify } from "node:util";
 
-const execFileAsync = promisify(execFile);
 const EFFORT_MAP = {
   off: null,
   minimal: "low",
@@ -20,7 +19,18 @@ export const openaiProvider = {
   // Shells out to the codex CLI — no direct HTTP API, native tool calling unavailable.
   capabilities: { toolCalling: false },
 
+  async isAvailable() {
+    try {
+      const execFileAsync = promisify(cp.execFile);
+      await execFileAsync("codex", ["--version"]);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
   async fetchModels() {
+    const execFileAsync = promisify(cp.execFile);
     const { stdout } = await execFileAsync("codex", ["debug", "models"]);
     const { models } = JSON.parse(stdout);
     return models

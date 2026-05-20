@@ -52,7 +52,7 @@ export const promptCommand = {
       );
       const defaultText =
         layer === "system"
-          ? "You are Mr. Mush.\nBe direct, precise, and pragmatic.\nPrefer concrete implementation details over generic advice.\n"
+          ? "You are Mush.\nBe direct, precise, and pragmatic.\nPrefer concrete implementation details over generic advice.\n"
           : layer === "profile"
             ? "Default profile:\n- Keep answers concise.\n- Explain tradeoffs when they affect implementation.\n"
             : layer === "provider"

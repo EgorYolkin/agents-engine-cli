@@ -84,28 +84,42 @@ export async function updateSessionMeta(historyDir, sessionId, patch) {
   await writeIndex(`${historyDir}/index.json`, index);
 }
 
+// Serialize index writes per directory to prevent race conditions
+// when multiple recordMessage() calls run concurrently.
+const _indexWriteQueue = new Map();
+
+function enqueueIndexWrite(historyDir, fn) {
+  const key = historyDir;
+  const prev = _indexWriteQueue.get(key) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  _indexWriteQueue.set(key, next);
+  return next;
+}
+
 export async function recordMessage(historyDir, sessionId, message) {
   const filePath = sessionFilePath(historyDir, sessionId);
   await appendMessage(filePath, { ...message, timestamp: new Date().toISOString() });
 
-  const index = await readIndex(`${historyDir}/index.json`);
-  if (index[sessionId]) {
-    const updatedAt = new Date().toISOString();
-    const usage = extractUsageTotals(message.usage);
-    index[sessionId].messageCount = (index[sessionId].messageCount ?? 0) + 1;
-    index[sessionId].updatedAt = updatedAt;
-    index[sessionId].userMessages = (index[sessionId].userMessages ?? 0) + (message.role === "user" ? 1 : 0);
-    index[sessionId].assistantMessages = (index[sessionId].assistantMessages ?? 0) + (message.role === "assistant" ? 1 : 0);
-    index[sessionId].inputTokens = (index[sessionId].inputTokens ?? 0) + usage.inputTokens;
-    index[sessionId].outputTokens = (index[sessionId].outputTokens ?? 0) + usage.outputTokens;
-    index[sessionId].totalTokens = (index[sessionId].totalTokens ?? 0) + usage.totalTokens;
-    index[sessionId].durationMs = Math.max(
-      0,
-      new Date(updatedAt).getTime() - new Date(index[sessionId].createdAt).getTime(),
-    );
-    if (!index[sessionId].title && message.role === "user") {
-      index[sessionId].title = generateTitle(message.content);
+  await enqueueIndexWrite(historyDir, async () => {
+    const index = await readIndex(`${historyDir}/index.json`);
+    if (index[sessionId]) {
+      const updatedAt = new Date().toISOString();
+      const usage = extractUsageTotals(message.usage);
+      index[sessionId].messageCount = (index[sessionId].messageCount ?? 0) + 1;
+      index[sessionId].updatedAt = updatedAt;
+      index[sessionId].userMessages = (index[sessionId].userMessages ?? 0) + (message.role === "user" ? 1 : 0);
+      index[sessionId].assistantMessages = (index[sessionId].assistantMessages ?? 0) + (message.role === "assistant" ? 1 : 0);
+      index[sessionId].inputTokens = (index[sessionId].inputTokens ?? 0) + usage.inputTokens;
+      index[sessionId].outputTokens = (index[sessionId].outputTokens ?? 0) + usage.outputTokens;
+      index[sessionId].totalTokens = (index[sessionId].totalTokens ?? 0) + usage.totalTokens;
+      index[sessionId].durationMs = Math.max(
+        0,
+        new Date(updatedAt).getTime() - new Date(index[sessionId].createdAt).getTime(),
+      );
+      if (!index[sessionId].title && message.role === "user") {
+        index[sessionId].title = generateTitle(message.content);
+      }
+      await writeIndex(`${historyDir}/index.json`, index);
     }
-    await writeIndex(`${historyDir}/index.json`, index);
-  }
+  });
 }

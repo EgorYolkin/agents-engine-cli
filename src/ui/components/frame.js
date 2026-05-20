@@ -66,7 +66,7 @@ export function buildAiMessageFrame(text, context) {
   const theme = activeTheme(context);
   const symbol = resolveSymbol(context);
   const accent = color(theme, "accent", chalk.magenta);
-  const name = theme.layout?.agentName ?? "mr. mush";
+  const name = theme.layout?.agentName ?? "Mush";
   const contentWidth = Math.max(1, (process.stdout.columns || 80) - 4);
 
   // Strip tool markup first, then render markdown with syntax highlighting.
@@ -106,7 +106,7 @@ export function buildTerminalEventFrame(text, context) {
   const muted = color(theme, "muted", chalk.dim);
   const accent = color(theme, "accent", chalk.magenta);
   const symbol = resolveSymbol(context);
-  const name = theme.layout?.agentName ?? "mr. mush";
+  const name = theme.layout?.agentName ?? "Mush";
   const contentWidth = Math.max(1, (process.stdout.columns || 80) - 4);
   const bodyLines = buildMessageLines(text, contentWidth);
   const lines = [`${accent(`${symbol}\u00A0${name}`)}`];

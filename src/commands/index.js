@@ -1,14 +1,20 @@
 import { loadConfig } from "../config/loader.js";
 import { createCommandManager } from "./manager.js";
 
-export const commandManager = createCommandManager();
+let _commandManager = null;
+function getCommandManager() {
+  if (!_commandManager) {
+    _commandManager = createCommandManager();
+  }
+  return _commandManager;
+}
 
 export function getSuggestions(buffer, i18n) {
-  return commandManager.getSuggestions(buffer, i18n);
+  return getCommandManager().getSuggestions(buffer, i18n);
 }
 
 export function getUsageHint(buffer) {
-  return commandManager.getUsageHint(buffer);
+  return getCommandManager().getUsageHint(buffer);
 }
 
 export async function executeCommand(text, context) {
@@ -18,7 +24,7 @@ export async function executeCommand(text, context) {
     runtimeOverrides: context.runtimeOverrides,
   });
 
-  return commandManager.execute(rawCmd, {
+  return getCommandManager().execute(rawCmd, {
     raw: text,
     args: argParts,
     arg: argParts[0] ?? "",

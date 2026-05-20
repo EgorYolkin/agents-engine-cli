@@ -266,7 +266,9 @@ export async function promptSearchSelect(
   const renderState = { cursorUpLines: 0, blockHeight: 0, totalRenderedLines: 0 };
 
   return new Promise((resolve) => {
-    process.stdin.setRawMode(true);
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+    }
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
 
@@ -311,7 +313,9 @@ export async function promptSearchSelect(
     }
 
     function cleanup() {
-      process.stdin.setRawMode(false);
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
       process.stdin.pause();
       process.stdin.removeListener("data", onData);
       process.stdout.removeListener("resize", rerender);

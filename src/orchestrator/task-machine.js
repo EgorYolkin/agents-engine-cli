@@ -26,6 +26,7 @@ export function createTaskMachine({
     initial: "idle",
     context: ({ input }) => ({
       prompt: input?.prompt ?? "",
+      messages: input?.messages ?? null,
       domain: null,
       action: null,
       confidence: 0,
@@ -106,6 +107,7 @@ export function createTaskMachine({
               provider: context.provider,
               config: context.config,
               prompt: context.prompt,
+              messages: context.messages,
               runtimeOverrides: context.runtimeOverrides,
               signal: context.signal,
               context: context.contextRef,

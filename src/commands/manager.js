@@ -1,7 +1,9 @@
+import { benchmarkCommand } from "./commands/benchmark.js";
 import { cardCommand } from "./commands/card.js";
 import { configCommand } from "./commands/config.js";
 import { debugCommand } from "./commands/debug.js";
 import { dotCommand } from "./commands/dot.js";
+import { experimentsCommand } from "./commands/experiments.js";
 import { forkCommand } from "./commands/fork.js";
 import { initThemeCommand } from "./commands/inittheme.js";
 import { mcpCommand } from "./commands/mcp.js";
@@ -10,7 +12,6 @@ import { newCommand } from "./commands/new.js";
 import { onboardCommand } from "./commands/onboard.js";
 import { profileCommand } from "./commands/profile.js";
 import { promptCommand } from "./commands/prompt.js";
-import { providerCommand } from "./commands/provider.js";
 import { resumeCommand } from "./commands/resume.js";
 import { statusbarCommand } from "./commands/statusbar.js";
 import { thinkCommand } from "./commands/think.js";
@@ -19,9 +20,9 @@ import { usageCommand } from "./commands/usage.js";
 import { errorResult } from "./results.js";
 
 const BUILT_IN_COMMANDS = [
+  benchmarkCommand,
   thinkCommand,
   configCommand,
-  providerCommand,
   modelCommand,
   profileCommand,
   promptCommand,
@@ -32,6 +33,7 @@ const BUILT_IN_COMMANDS = [
   usageCommand,
   updateCommand,
   debugCommand,
+  experimentsCommand,
   initThemeCommand,
   onboardCommand,
   statusbarCommand,

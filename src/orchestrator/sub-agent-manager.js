@@ -71,7 +71,7 @@ export async function spawnWorker(domain, taskContext) {
     provider: taskContext.provider,
     config: workerConfig,
     prompt: taskContext.prompt,
-    messages: buildWorkerMessages(workerConfig.promptStack, taskContext.prompt),
+    messages: taskContext.messages ?? buildWorkerMessages(workerConfig.promptStack, taskContext.prompt),
     runtimeOverrides: taskContext.runtimeOverrides,
     signal: taskContext.signal,
     context: {

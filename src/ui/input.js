@@ -433,7 +433,9 @@ export function promptInput(
   const renderState = createRenderState();
 
   return new Promise((resolve) => {
-    process.stdin.setRawMode(true);
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(true);
+    }
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
 
@@ -530,7 +532,9 @@ export function promptInput(
         clearInterval(tokenAnimation);
         tokenAnimation = null;
       }
-      process.stdin.setRawMode(false);
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
       process.stdin.pause();
       process.stdin.removeListener("data", onData);
       process.stdout.removeListener("resize", handleResize);
@@ -857,7 +861,9 @@ export function createPassiveInputBuffer(
     render();
   }
 
-  process.stdin.setRawMode(true);
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+  }
   process.stdin.resume();
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", onData);
@@ -885,7 +891,9 @@ export function createPassiveInputBuffer(
       if (autoResize) {
         process.stdout.removeListener("resize", render);
       }
-      process.stdin.setRawMode(false);
+      if (process.stdin.isTTY) {
+        process.stdin.setRawMode(false);
+      }
       process.stdin.pause();
       return buffer;
     },

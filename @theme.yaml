@@ -1,4 +1,4 @@
-# Mr. Mush theme for the current project.
+# Mush theme for the current project.
 # This file overrides the built-in theme and the global ~/.mrmush/theme.yaml.
 # Change only the fields you need; missing values will be inherited.
 # After editing, restart mrmush in this project.

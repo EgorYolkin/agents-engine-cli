@@ -204,3 +204,22 @@ export async function openAiCompatibleChat({
     assistantMessage,
   };
 }
+
+export async function fetchOpenAiCompatibleModels(baseUrl, apiKey = null, headers = {}) {
+  const res = await fetch(`${baseUrl}/v1/models`, {
+    headers: {
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      ...headers,
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch models: ${res.status} ${res.statusText}`);
+  }
+  const data = await res.json();
+  const models = Array.isArray(data.data) ? data.data : [];
+  return models.map((m) => ({
+    value: m.id,
+    label: m.id,
+  }));
+}
+

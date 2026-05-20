@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { successResult } from "../results.js";
 
 export const debugCommand = {
@@ -21,6 +23,11 @@ export const debugCommand = {
       ...context.runtimeOverrides,
       debug: nextValue,
     };
+
+    if (nextValue) {
+      const cwd = context.config?.paths?.cwd ?? process.cwd();
+      await fs.mkdir(path.join(cwd, ".mush", "debug", "logs"), { recursive: true }).catch(() => {});
+    }
 
     return successResult(
       i18n.t("commands.messages.debugSet", {

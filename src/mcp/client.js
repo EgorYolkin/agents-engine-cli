@@ -25,7 +25,12 @@ function createTransport(serverConfig) {
       args: serverConfig.args ?? [],
       cwd: serverConfig.cwd,
       env: {
-        ...process.env,
+        PATH: process.env.PATH ?? "",
+        HOME: process.env.HOME ?? "",
+        USER: process.env.USER ?? "",
+        SHELL: process.env.SHELL ?? "",
+        TERM: process.env.TERM ?? "xterm-256color",
+        LANG: process.env.LANG ?? "C.UTF-8",
         ...(serverConfig.env ?? {}),
       },
       stderr: "pipe",

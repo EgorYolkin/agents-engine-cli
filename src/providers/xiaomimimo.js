@@ -31,7 +31,7 @@ export const xiaomimimoProvider = {
   labelKey: "providers.xiaomimimo.label",
   source: "api",
   binary: "env",
-  defaultModel: "deepseek-v4-flash",
+  defaultModel: "mimo-v2.5",
   capabilities: { toolCalling: "dynamic" },
 
   getAuthRequirements(resolvedConfig) {

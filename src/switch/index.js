@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { promptSearchSelect } from "../ui/components/search-select.js";
 import { renderInputBox } from "../ui/input.js";
 import { getProvider, getProviderLabel, PROVIDERS } from "../providers/index.js";
@@ -113,12 +115,16 @@ function createDebugBlock() {
         description: value === current ? "current" : "",
       }));
     },
-    async apply(context, _config, option) {
+    async apply(context, config, option) {
       const nextValue = option.value === "on";
       context.runtimeOverrides = {
         ...context.runtimeOverrides,
         debug: nextValue,
       };
+      if (nextValue) {
+        const cwd = config?.paths?.cwd ?? process.cwd();
+        await fs.mkdir(path.join(cwd, ".mush", "debug", "logs"), { recursive: true }).catch(() => {});
+      }
       return {
         message: context.i18n.t("commands.messages.debugSet", {
           mode: nextValue ? "on" : "off",

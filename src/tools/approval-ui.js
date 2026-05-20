@@ -71,7 +71,7 @@ function paintDiffLine(line) {
 
 function render({ title, bodyLines, options, selectedIdx, rerender = false }) {
   const accent = chalk.hex("#a855f7");
-  const headerLine = `${accent("⬢")}  ${accent("mr. mush")}`;
+  const headerLine = `${accent("⬢")}  ${accent("Mush")}`;
   const titleLine = `    ${title}`;
   const allLines = [headerLine, titleLine, ...bodyLines, "", ...options.map((option, index) => {
     const pointer = index === selectedIdx ? accent("❯") : " ";

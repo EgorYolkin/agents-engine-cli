@@ -186,6 +186,16 @@ const toolsSchema = z
             "head",
             "tail",
             "tree",
+            "sort",
+            "wc",
+            "grep",
+            "file",
+            "stat",
+            "du",
+            "which",
+            "echo",
+            "basename",
+            "dirname",
           ]),
         allowed_git_subcommands: z
           .array(z.string().min(1))
@@ -229,6 +239,12 @@ const mcpSchema = z
   })
   .default({});
 
+const experimentsSchema = z
+  .object({
+    paraphrase: z.boolean().default(false),
+  })
+  .default({});
+
 export const userConfigSchema = z
   .object({
     schema_version: z.number().int().positive().default(1),
@@ -256,6 +272,7 @@ export const userConfigSchema = z
       .default({}),
     prompts: promptLayerPathsSchema.default({}),
     mcp: mcpSchema,
+    experiments: experimentsSchema,
   })
   .strict();
 
@@ -365,6 +382,7 @@ export const builtInConfig = Object.freeze(
       },
     },
     mcp: {},
+    experiments: {},
   }),
 );
 

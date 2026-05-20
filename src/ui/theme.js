@@ -145,13 +145,13 @@ export const builtInThemeDefinition = Object.freeze({
     },
   },
   layout: {
-    agentName: "mr. mush",
+    agentName: "Mush",
     inputPaddingX: 0,
     transcriptIndent: "  ",
     messageIndent: "  ",
     continuationIndent: "    ",
     maxSuggestions: 8,
-    splashTitle: "MR. MUSH",
+    splashTitle: "Mush",
     splash: [
       "      ▄▄███▄▄",
       "    ▄███▀█▀███▄",

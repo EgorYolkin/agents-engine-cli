@@ -1,6 +1,5 @@
 import { getEnabledMcpServers } from "../../mcp/servers.js";
-import { buildChatListFrame } from "../../ui/components/list.js";
-import { renderedResult } from "../results.js";
+import { successResult } from "../results.js";
 
 function formatMcpServer(server) {
   const endpoint =
@@ -8,33 +7,24 @@ function formatMcpServer(server) {
       ? server.url
       : [server.command, ...(server.args ?? [])].filter(Boolean).join(" ");
 
-  return {
-    id: server.id,
-    detail: server.startup_timeout_sec
-      ? `${server.transport}, ${server.startup_timeout_sec}s`
-      : server.transport,
-    description: [endpoint, server.cwd].filter(Boolean).join(" · "),
-    marker: "•",
-  };
-}
+  const detail = server.startup_timeout_sec
+    ? `${server.transport}, ${server.startup_timeout_sec}s`
+    : server.transport;
 
-function renderMcpServersCard(frame) {
-  process.stdout.write(frame.text);
+  return `- **${server.id}** (${detail}) — ${endpoint}${server.cwd ? ` · ${server.cwd}` : ""}`;
 }
 
 export const mcpCommand = {
   name: "mcp",
   descriptionKey: "commands.descriptions.mcp",
   usage: "/mcp",
-  async execute({ context, config }) {
+  async execute({ config }) {
     const mcpServers = getEnabledMcpServers(config).map(formatMcpServer);
 
-    renderMcpServersCard(
-      buildChatListFrame("mcp", mcpServers, context, {
-        emptyText: "No enabled MCP servers",
-      }),
-    );
+    if (mcpServers.length === 0) {
+      return successResult("No enabled MCP servers");
+    }
 
-    return renderedResult();
+    return successResult(`MCP servers:\n${mcpServers.join("\n")}`);
   },
 };

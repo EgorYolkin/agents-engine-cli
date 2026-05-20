@@ -30,6 +30,16 @@
     "missingEnvSuffix": "env: {envKey}",
     "notInstalledSuffix": "не установлен"
   },
+  "switch": {
+    "prompts": {
+      "target": "Выберите что переключить:",
+      "value": "Выберите {target}:"
+    },
+    "errors": {
+      "unknownBlock": "Неизвестный блок: {block}"
+    },
+    "currentValue": "текущее: {value}"
+  },
   "setup": {
     "cancelled": "Настройка прервана",
     "spinner": {
@@ -96,6 +106,7 @@
   },
   "commands": {
     "descriptions": {
+      "benchmark": "Запустить бенчмарк парафразинга",
       "think": "Установить уровень размышления",
       "config": "Показать, изменить или сохранить конфиг",
       "provider": "Переключить активный провайдер",
@@ -104,7 +115,7 @@
       "prompt": "Просмотреть или изменить prompt layers",
       "usage": "Показать общую usage статистику",
       "mcp": "Показать активные MCP-серверы",
-      "update": "Проверить обновления Mr. Mush",
+      "update": "Проверить обновления Mush",
       "fork": "Создать ответвление текущей сессии",
       "new": "Начать новую сессию",
       "debug": "Переключить debug-режим",
@@ -113,7 +124,8 @@
       "resume": "Открыть браузер сессий",
       "card": "Показать карточку гриба",
       "inittheme": "Создать theme.yaml для проекта",
-      "onboard": "Запустить настройку заново"
+      "onboard": "Запустить настройку заново",
+      "experiments": "Переключить экспериментальные функции"
     },
     "args": {
       "off": "Без reasoning",
@@ -137,7 +149,8 @@
       "promptLayerProvider": "Provider prompt layer",
       "promptLayerProject": "Project prompt layer",
       "updateCheck": "Проверить последнюю версию",
-      "updateInstall": "Проверить и установить последнюю версию"
+      "updateInstall": "Проверить и установить последнюю версию",
+      "status": "Показать текущий статус"
     },
     "messages": {
       "thinkingSet": "{tick} thinking: {level}",
@@ -176,20 +189,20 @@
   },
   "update": {
     "prompts": {
-      "install": "Доступен Mr. Mush {latestVersion} (текущая версия {currentVersion}). Установить сейчас?"
+      "install": "Доступен Mush {latestVersion} (текущая версия {currentVersion}). Установить сейчас?"
     },
     "messages": {
-      "available": "Доступен Mr. Mush {latestVersion} (текущая версия {currentVersion}). Запусти /update install для установки.",
+      "available": "Доступен Mush {latestVersion} (текущая версия {currentVersion}). Запусти /update install для установки.",
       "cancelled": "Обновление отменено.",
-      "current": "Mr. Mush обновлен до актуальной версии ({currentVersion}).",
-      "installed": "Обновление установлено. Перезапусти Mr. Mush, чтобы использовать новую версию.",
+      "current": "Mush обновлен до актуальной версии ({currentVersion}).",
+      "installed": "Обновление установлено. Перезапусти Mush, чтобы использовать новую версию.",
       "installFailed": "Установка обновления завершилась с кодом {code}.",
       "unavailable": "Не удалось проверить обновления прямо сейчас."
     }
   },
   "themeTemplate": {
     "header": {
-      "title": "Тема Mr. Mush для текущего проекта.",
+      "title": "Тема Mush для текущего проекта.",
       "line1": "Этот файл переопределяет встроенную тему и глобальную ~/.mrmush/theme.yaml.",
       "line2": "Изменяй только нужные поля: отсутствующие значения будут унаследованы.",
       "line3": "После правок просто перезапусти mrmush в этом проекте."

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
 
 const DEFAULT_DENIED_PATHS = [
@@ -10,7 +11,25 @@ const DEFAULT_DENIED_PATHS = [
 ];
 
 function isInsideCwd(resolvedPath, cwd) {
-  const relativePath = path.relative(cwd, resolvedPath);
+  // Resolve symlinks to prevent traversal via symlinked directories.
+  let realCwd;
+  try {
+    realCwd = fsSync.realpathSync(cwd);
+  } catch {
+    realCwd = cwd;
+  }
+
+  let realTarget;
+  try {
+    // Resolve the parent dir (the file itself may not exist yet).
+    const parentDir = fsSync.realpathSync(path.dirname(resolvedPath));
+    realTarget = path.join(parentDir, path.basename(resolvedPath));
+  } catch {
+    // Parent doesn't exist yet — fall back to logical path check.
+    realTarget = resolvedPath;
+  }
+
+  const relativePath = path.relative(realCwd, realTarget);
   return relativePath === "" || (!relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 }
 

@@ -39,7 +39,8 @@ export class Router {
         break;
       }
       case "setup": {
-        const config = await runSetupScreen(this.context);
+        const runSetup = this.context.runSetupScreen ?? runSetupScreen;
+        const config = await runSetup(this.context);
         this.context.config = config;
         this.currentScene = "chat";
         break;
@@ -50,7 +51,8 @@ export class Router {
           cwd: this.context.cwd,
           runtimeOverrides: this.context.runtimeOverrides,
         });
-        await runChatScreen(this.context);
+        const runChat = this.context.runChatScreen ?? runChatScreen;
+        await runChat(this.context);
         break;
     }
   }

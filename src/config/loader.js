@@ -16,7 +16,7 @@ const APP_DIR_NAME = ".mrmush";
 const CONFIG_FILE_NAME = "config.toml";
 const THEME_FILE_NAME = "theme.yaml";
 const LEGACY_DEFAULT_SYSTEM_PROMPT = [
-  "You are Mr. Mush.",
+  "You are Mush.",
   "Be direct, precise, and pragmatic.",
   "Prefer concrete implementation details over generic advice.",
   "",
@@ -27,7 +27,7 @@ const LEGACY_DEFAULT_SYSTEM_PROMPT = [
   "Do not wrap tool calls in additional JSON or prose. After receiving a tool result, use it to answer the user.",
 ].join("\n");
 const DEFAULT_SYSTEM_PROMPT = [
-  "You are Mr. Mush.",
+  "You are Mush.",
   "Be direct, precise, and pragmatic.",
   "Prefer concrete implementation details over generic advice.",
   "",
@@ -357,6 +357,7 @@ function toUserConfig(config) {
     providers: config.providers,
     prompts: config.prompts,
     mcp: config.mcp,
+    experiments: config.experiments,
   };
 }
 
@@ -378,14 +379,15 @@ export async function saveConfigPatch(
     scope === "project" ? paths.projectConfigFile : paths.configFile;
   const current = (await readTomlFile(filePath)) ?? {};
   const patched = setAtPath(structuredClone(current), dottedPath, value);
-  const validated = userConfigSchema.parse(
-    mergeObjects(builtInConfig, patched),
-  );
+
+  // Validate against full merged config to catch schema violations,
+  // but write only the user's overrides to keep the config file minimal.
+  userConfigSchema.parse(mergeObjects(builtInConfig, patched));
 
   await ensureDir(path.dirname(filePath));
   await backupFile(filePath, paths);
-  await fs.writeFile(filePath, stringifyToml(validated), "utf8");
-  return validated;
+  await fs.writeFile(filePath, stringifyToml(patched), "utf8");
+  return patched;
 }
 
 export async function saveState(state, paths = getAppPaths()) {
@@ -418,6 +420,12 @@ export async function loadConfig({
   await ensureDir(paths.promptsDir);
   await ensureDir(paths.profilesDir);
   await ensureDir(paths.providerPromptsDir);
+  const isDebug = runtimeOverrides.debug !== undefined
+    ? runtimeOverrides.debug
+    : !!env.MRMUSH_DEBUG;
+  if (isDebug) {
+    await ensureDir(path.join(cwd, ".mush", "debug", "logs"));
+  }
   await ensurePromptFile(
     paths.systemPromptFile,
     DEFAULT_SYSTEM_PROMPT,
